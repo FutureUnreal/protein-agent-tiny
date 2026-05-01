@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import shutil
@@ -55,9 +56,9 @@ Data governance:
 
 Iteration protocol:
 1. Read `iteration_context.json`.
-2. Write `hypothesis.md` with the current hypothesis, expected metric movement, and risk.
-3. Edit only `solver.py` and notes files in this workspace.
-4. Run a bounded smoke test before finishing.
+2. Write a concise `hypothesis.md` with at most 12 bullet lines.
+3. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
+4. Run a bounded smoke test before finishing when code changed.
 5. Append concise evidence to `notes.md`.
 """
 
@@ -78,10 +79,11 @@ Required behavior:
 - Use no forbidden competition structures or trajectories.
 - Keep runtime bounded.
 
-This iteration must explicitly propose one hypothesis before changing code. Write it to `hypothesis.md`.
+This iteration must explicitly propose one hypothesis. Write it to `hypothesis.md` in at most 12 concise bullet lines.
 Base changes on the prior observations in `iteration_context.json`; do not blindly rewrite the whole file.
+You are allowed to leave `solver.py` unchanged when the iteration is observation-only, but say that explicitly in `hypothesis.md` and final answer.
 
-After edits, run `python print_sequence.py 1` to get the first sequence, then run:
+If you edit `solver.py`, run `python print_sequence.py 1` to get the first sequence, then run:
 python solver.py --problem-id 1 --sequence <that_sequence> --num-conformers 2 --optimization-rounds {solver_rounds} --out-dir smoke
 
 Then summarize what changed.
@@ -93,6 +95,7 @@ class IterationResult:
     iteration: int
     accepted: bool
     score: float
+    solver_changed: bool
     report_path: str | None
     run_id: str | None
     stop_reason: str | None
@@ -146,6 +149,7 @@ def build_agent(workspace: Path, model: str, base_url: str | None):
         max_llm_calls=int(os.environ.get("PROTEIN_AGENT_MAX_LLM_CALLS", "20")),
         max_tool_calls=int(os.environ.get("PROTEIN_AGENT_MAX_TOOL_CALLS", "60")),
         max_wall_ms=int(os.environ.get("PROTEIN_AGENT_MAX_WALL_MS", "1800000")),
+        max_output_tokens_per_call=int(os.environ.get("PROTEIN_AGENT_MAX_OUTPUT_TOKENS", "8192")),
         loop_same_action_limit=4,
     )
     policy = ToolPolicy(
@@ -225,6 +229,7 @@ def write_iteration_context(
                 "iteration": item.iteration,
                 "score_proxy": item.score,
                 "accepted": item.accepted,
+                "solver_changed": item.solver_changed,
                 "hypothesis": item.hypothesis[:2000],
                 "error": item.error,
             }
@@ -235,6 +240,10 @@ def write_iteration_context(
             "requested conformer count coverage, finite coordinates, and candidate count. "
             "It is not the official hidden score."
         ),
+        "code_change_policy": (
+            "Code changes are encouraged but not mandatory. Observation-only iterations are valid "
+            "when explicitly justified. The runner records solver_changed for audit."
+        ),
     }
     (workspace / "iteration_context.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
 
@@ -244,6 +253,36 @@ def load_hypothesis(workspace: Path) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")[:6000]
+
+
+def write_solver_diff(workspace: Path, iteration: int, before: str, after: str) -> bool:
+    diff = "".join(
+        difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"solver.before.iteration_{iteration:02d}.py",
+            tofile=f"solver.after.iteration_{iteration:02d}.py",
+        )
+    )
+    (workspace / f"solver_diff_{iteration:02d}.patch").write_text(diff, encoding="utf-8")
+    return bool(diff)
+
+
+def stopped_for_max_tokens(events_path: str | None) -> bool:
+    if not events_path:
+        return False
+    path = Path(events_path)
+    if not path.exists():
+        return False
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        payload = event.get("payload") or {}
+        if event.get("type") == "ASSISTANT_MESSAGE" and payload.get("stop_reason") == "max_tokens":
+            return True
+    return False
 
 
 def run_agent_iterations(
@@ -262,11 +301,13 @@ def run_agent_iterations(
 
     for iteration in range(1, iterations + 1):
         shutil.copy2(best_solver, workspace / "solver.py")
+        solver_before = (workspace / "solver.py").read_text(encoding="utf-8")
         write_iteration_context(workspace, iteration, iterations, best_score, history)
         result = None
         report: dict[str, object] | None = None
         report_path: Path | None = None
         error: str | None = None
+        solver_changed = False
         agent = build_agent(workspace, model, base_url)
         try:
             result = agent.run_sync(
@@ -277,6 +318,10 @@ def run_agent_iterations(
                 )
             )
             (workspace / f"agent_final_answer_{iteration:02d}.md").write_text(result.final_answer, encoding="utf-8")
+            solver_after = (workspace / "solver.py").read_text(encoding="utf-8")
+            solver_changed = write_solver_diff(workspace, iteration, solver_before, solver_after)
+            if stopped_for_max_tokens(getattr(result, "events_path", None)):
+                raise RuntimeError("agent response stopped at max_tokens before completing the iteration")
             report_path = iteration_root / f"iteration_{iteration:02d}"
             report = run_suite(workspace / "solver.py", report_path, solver_rounds, clean=True)
             score = proxy_score(report)
@@ -296,6 +341,7 @@ def run_agent_iterations(
             iteration=iteration,
             accepted=accepted,
             score=score,
+            solver_changed=solver_changed,
             report_path=str(report_path) if report_path is not None else None,
             run_id=getattr(result, "run_id", None),
             stop_reason=getattr(result, "stop_reason", None),
@@ -336,6 +382,7 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             iteration=item.iteration,
             accepted=item.accepted,
             score_proxy=item.score,
+            solver_changed=item.solver_changed,
             run_id=item.run_id,
             stop_reason=item.stop_reason,
             metrics=item.metrics,
@@ -349,6 +396,7 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             iteration=item.iteration,
             accepted=item.accepted,
             score_proxy=item.score,
+            solver_changed=item.solver_changed,
             report_path=item.report_path,
             error=item.error,
         )

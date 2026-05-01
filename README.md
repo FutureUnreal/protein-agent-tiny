@@ -63,7 +63,7 @@ Arguments are:
 scripts/run_agent.sh <agent_iterations> <max_minutes_per_iteration> <solver_candidate_rounds>
 ```
 
-Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `iteration_context.json`, writes `hypothesis.md`, edits `solver.py`, runs experiments, and is accepted only if the validation-aware proxy score does not regress. The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
+Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `iteration_context.json`, writes a concise `hypothesis.md`, optionally edits `solver.py`, runs experiments, and records whether the solver changed. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` are rejected. The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
 
 ## Technical Report
 
