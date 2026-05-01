@@ -5,4 +5,5 @@ __pycache__/
 runs/
 workspaces/
 outputs/
+memory/
 *.egg-info/

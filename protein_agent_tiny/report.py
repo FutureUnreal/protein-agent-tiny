@@ -28,6 +28,29 @@ def build_report(run_dir: Path) -> str:
             f"- Queries: `{', '.join(literature.get('queries') or [])}`",
             "",
         ])
+    environment = data.get("environment") or {}
+    if environment:
+        commands = environment.get("commands") or {}
+        modules = environment.get("python_modules") or {}
+        lines.extend([
+            "## Environment",
+            "",
+            f"- CPU count: `{environment.get('cpu_count')}`",
+            f"- Disk free GB: `{(environment.get('disk') or {}).get('free_gb')}`",
+            f"- NVIDIA SMI available: `{commands.get('nvidia_smi')}`",
+            f"- Torch available: `{modules.get('torch')}`",
+            "",
+        ])
+    memory = data.get("memory_summary") or {}
+    if memory:
+        lines.extend([
+            "## Memory",
+            "",
+            f"- Best score recorded: `{memory.get('best_score')}`",
+            f"- Accepted iterations: `{memory.get('accepted_count')}`",
+            f"- Memory workspace: `{memory.get('workspace')}`",
+            "",
+        ])
     lines.extend([
         "## Results",
         "",

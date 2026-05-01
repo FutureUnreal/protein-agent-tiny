@@ -9,7 +9,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .environment import write_environment_report
 from .literature import collect_literature
+from .memory import update_memory, write_memory_context
 from .report import build_report
 from .run_suite import DEFAULT_OUTPUT, ROOT, append_log, package_output, run_suite
 from .validate import validate_submission
@@ -57,11 +59,12 @@ Data governance:
 
 Iteration protocol:
 1. Read `iteration_context.json`.
-2. Read `literature_review.md` and cite one relevant design implication in `hypothesis.md`.
-3. Write a concise `hypothesis.md` with at most 12 bullet lines.
-4. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
-5. Run a bounded smoke test before finishing when code changed.
-6. Append concise evidence to `notes.md`.
+2. Read `memory_context.md`, `environment_report.md`, and `literature_review.md`.
+3. Cite one relevant prior lesson, environment constraint, or literature implication in `hypothesis.md`.
+4. Write a concise `hypothesis.md` with at most 12 bullet lines.
+5. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
+6. Run a bounded smoke test before finishing when code changed.
+7. Append concise evidence to `notes.md`.
 """
 
 
@@ -72,6 +75,8 @@ Files available:
 - problems/*.json: official problem inputs.
 - README_AGENT.md: concise task spec.
 - literature_review.md and literature_sources.json: OpenAlex literature retrieval results for architecture inspiration.
+- environment_report.md/json: CPU/GPU/memory/package availability for choosing bounded methods.
+- memory_context.md/json: prior run lessons and best run summaries.
 - iteration_context.json: previous metrics, accepted solver history, and current constraints.
 - .skills/protein-ensemble/SKILL.md: task-specific operating procedure.
 
@@ -83,7 +88,7 @@ Required behavior:
 - Keep runtime bounded.
 
 This iteration must explicitly propose one hypothesis. Write it to `hypothesis.md` in at most 12 concise bullet lines.
-Base changes on the prior observations in `iteration_context.json` and at least one relevant point from `literature_review.md`; do not blindly rewrite the whole file.
+Base changes on the prior observations in `iteration_context.json`, available compute in `environment_report.md`, prior lessons in `memory_context.md`, and at least one relevant point from `literature_review.md`; do not blindly rewrite the whole file.
 You are allowed to leave `solver.py` unchanged when the iteration is observation-only, but say that explicitly in `hypothesis.md` and final answer.
 
 If you edit `solver.py`, run `python print_sequence.py 1` to get the first sequence, then run:
@@ -281,6 +286,8 @@ def write_iteration_context(
         ],
         "literature_review_path": "literature_review.md",
         "literature_sources_path": "literature_sources.json",
+        "environment_report_path": "environment_report.md",
+        "memory_context_path": "memory_context.md",
         "score_proxy_definition": (
             "Internal selection proxy only: validation success, bounded CA diversity, "
             "requested conformer count coverage, finite coordinates, and candidate count. "
@@ -536,6 +543,33 @@ def append_literature_audit(agent_log: Path, literature: dict[str, object]) -> N
     )
 
 
+def append_environment_audit(agent_log: Path, environment: dict[str, object]) -> None:
+    append_log(
+        agent_log,
+        "environment_probe",
+        summary="Environment probe completed before agent iteration.",
+        cpu_count=environment.get("cpu_count"),
+        disk=environment.get("disk"),
+        python_modules=environment.get("python_modules"),
+        commands={
+            key: value.get("available")
+            for key, value in (environment.get("commands") or {}).items()
+            if isinstance(value, dict)
+        },
+    )
+
+
+def append_memory_audit(agent_log: Path, memory_summary: dict[str, object] | None) -> None:
+    if memory_summary is None:
+        return
+    append_log(
+        agent_log,
+        "memory_update",
+        summary="Long-term project memory updated after this run.",
+        memory_summary=memory_summary,
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--iterations", type=int, default=2)
@@ -552,6 +586,8 @@ def main() -> int:
     base_url = os.environ.get("OPENAI_API_BASE")
     workspace = Path(args.workspace) if args.workspace else ROOT / "workspaces" / time.strftime("%Y%m%d_%H%M%S")
     prepare_workspace(workspace)
+    write_memory_context(ROOT, workspace)
+    environment = write_environment_report(workspace, ROOT)
     literature = collect_literature(workspace)
 
     history: list[IterationResult] = []
@@ -566,10 +602,13 @@ def main() -> int:
 
     out_root = Path(args.out)
     report = run_suite(workspace / "solver.py", out_root, max(1, args.solver_rounds), clean=True)
+    memory_summary = update_memory(ROOT, workspace, history, report, literature, environment)
+    append_environment_audit(out_root / "submission" / "agent.log", environment)
     append_literature_audit(out_root / "submission" / "agent.log", literature)
     if history:
         append_iteration_audit(out_root / "submission" / "agent.log", history)
         report["agent_iterations"] = [item.__dict__ for item in history]
+    append_memory_audit(out_root / "submission" / "agent.log", memory_summary)
     validation = validate_submission(out_root / "submission")
     package_output(out_root / "submission", out_root / "output.zip")
     report["validation"] = validation
@@ -580,6 +619,17 @@ def main() -> int:
         "queries": literature.get("queries"),
         "errors": literature.get("errors"),
     }
+    report["environment"] = {
+        "cpu_count": environment.get("cpu_count"),
+        "disk": environment.get("disk"),
+        "python_modules": environment.get("python_modules"),
+        "commands": {
+            key: value.get("available")
+            for key, value in (environment.get("commands") or {}).items()
+            if isinstance(value, dict)
+        },
+    }
+    report["memory_summary"] = memory_summary
     (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_root / "technical_report.md").write_text(build_report(out_root), encoding="utf-8")
     print(json.dumps(report, indent=2))
