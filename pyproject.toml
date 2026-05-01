@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "protein-agent-tiny"
+version = "0.1.0"
+description = "Tiny AI4S protein ensemble competition agent"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "all-in-agents[openai]>=0.2.0",
+]
+
+[project.scripts]
+protein-tiny-run = "protein_agent_tiny.run_suite:main"
+protein-tiny-agent = "protein_agent_tiny.agent_runner:main"
+protein-tiny-validate = "protein_agent_tiny.validate:main"
+protein-tiny-report = "protein_agent_tiny.report:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["protein_agent_tiny"]
