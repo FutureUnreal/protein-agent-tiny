@@ -34,6 +34,7 @@ scripts/deploy_uv.sh
 ```
 
 Set `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `PROTEIN_AGENT_MODEL` in `.env` or shell environment.
+For large-context models, `PROTEIN_AGENT_MAX_INPUT_TOKENS` and `PROTEIN_AGENT_MAX_OUTPUT_TOKENS` control the per-call budget passed to `all-in-agents`.
 
 ## Fast Baseline
 

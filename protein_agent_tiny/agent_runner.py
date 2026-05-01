@@ -149,6 +149,7 @@ def build_agent(workspace: Path, model: str, base_url: str | None):
         max_llm_calls=int(os.environ.get("PROTEIN_AGENT_MAX_LLM_CALLS", "20")),
         max_tool_calls=int(os.environ.get("PROTEIN_AGENT_MAX_TOOL_CALLS", "60")),
         max_wall_ms=int(os.environ.get("PROTEIN_AGENT_MAX_WALL_MS", "1800000")),
+        max_input_tokens_per_call=int(os.environ.get("PROTEIN_AGENT_MAX_INPUT_TOKENS", "128000")),
         max_output_tokens_per_call=int(os.environ.get("PROTEIN_AGENT_MAX_OUTPUT_TOKENS", "8192")),
         loop_same_action_limit=4,
     )
