@@ -29,10 +29,7 @@ It is intentionally not a general research app. There is no frontend and no cros
 
 ```bash
 cd protein-agent-tiny
-python -m venv .venv
-. .venv/bin/activate
-pip install -e .
-cp .env.example .env
+scripts/deploy_uv.sh
 ```
 
 Set `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `PROTEIN_AGENT_MODEL` in `.env` or shell environment.
@@ -42,8 +39,7 @@ Set `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `PROTEIN_AGENT_MODEL` in `.env` or 
 This does not call an LLM. It gives a valid, bounded submission.
 
 ```bash
-protein-tiny-run --clean --rounds 1
-protein-tiny-validate --submission-dir outputs/latest/submission
+scripts/run_baseline.sh 1
 ```
 
 The output archive is:
@@ -57,7 +53,7 @@ outputs/latest/output.zip
 This uses `all-in-agents` to edit a workspace copy of `solver.py`, then runs the suite.
 
 ```bash
-protein-tiny-agent --rounds 2 --max-minutes 20
+scripts/run_agent.sh 2 20
 ```
 
 The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
@@ -65,7 +61,17 @@ The latest agent workspace is under `workspaces/`, and the latest packaged submi
 ## Technical Report
 
 ```bash
-protein-tiny-report --run-dir outputs/latest
+.venv/bin/python -m protein_agent_tiny.report --run-dir outputs/latest
 ```
 
 This writes `outputs/latest/technical_report.md`.
+
+## Direct Module Commands
+
+The uv deployment installs the package into `.venv`, so these are equivalent:
+
+```bash
+.venv/bin/python -m protein_agent_tiny.run_suite --clean --rounds 1
+.venv/bin/python -m protein_agent_tiny.agent_runner --rounds 2 --max-minutes 20
+.venv/bin/python -m protein_agent_tiny.validate --submission-dir outputs/latest/submission
+```
