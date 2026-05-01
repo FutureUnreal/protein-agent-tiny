@@ -220,6 +220,33 @@ def build_reflection_agent(workspace: Path, model: str, base_url: str | None):
     )
 
 
+def bounded_peak_score(value: float, low: float, target: float, high: float) -> float:
+    if value <= low:
+        return 0.0
+    if value <= target:
+        return min(1.0, (value - low) / max(target - low, 1e-6))
+    if value >= high:
+        return 0.0
+    return max(0.0, 1.0 - (value - target) / max(high - target, 1e-6))
+
+
+def rg_plausibility_score(rg: float, sequence_length: float) -> float:
+    if rg <= 0 or sequence_length <= 0:
+        return 0.0
+    upper = 2.8 * (sequence_length ** 0.52)
+    if rg <= upper:
+        return 1.0
+    return max(0.0, 1.0 - (rg - upper) / max(1.2 * upper, 1e-6))
+
+
+def ca_spacing_score(min_distance: float, max_distance: float) -> float:
+    if min_distance <= 0 or max_distance <= 0 or min_distance > max_distance:
+        return 0.0
+    low_error = max(0.0, 3.65 - min_distance)
+    high_error = max(0.0, max_distance - 3.95)
+    return max(0.0, 1.0 - (low_error + high_error) / 0.8)
+
+
 def proxy_score(report: dict[str, object]) -> float:
     if not report.get("ok"):
         return -1.0
@@ -233,15 +260,30 @@ def proxy_score(report: dict[str, object]) -> float:
         info = result.get("final_info", {})
         if not isinstance(info, dict):
             continue
+        sequence_length = float(info.get("sequence_length") or 0.0)
         diversity = float(info.get("pairwise_ca_rmsd_mean") or 0.0)
+        rg = float(info.get("radius_of_gyration_mean") or 0.0)
+        min_ca = float(info.get("min_ca_distance") or 0.0)
+        max_ca = float(info.get("max_ca_distance") or 0.0)
         generated = float(info.get("num_conformers_generated") or 0.0)
         requested = max(1.0, float(info.get("conformer_count") or generated or 1.0))
         finite = 1.0 if info.get("coordinate_finite") else 0.0
         candidate_count = float(info.get("candidate_count") or generated or 0.0)
-        diversity_score = max(0.0, min(diversity, 25.0) / 25.0)
+        rg_upper = 2.8 * (sequence_length ** 0.52) if sequence_length > 0 else 25.0
+        diversity_target = max(6.0, min(25.0, 0.18 * rg_upper))
+        diversity_score = bounded_peak_score(diversity, 1.5, diversity_target, diversity_target * 3.0)
+        rg_score = rg_plausibility_score(rg, sequence_length)
+        spacing_score = ca_spacing_score(min_ca, max_ca)
         count_score = max(0.0, min(generated / requested, 1.0))
         candidate_score = max(0.0, min(candidate_count / max(generated, 1.0), 3.0) / 3.0)
-        scores.append(0.55 * diversity_score + 0.25 * count_score + 0.15 * finite + 0.05 * candidate_score)
+        scores.append(
+            0.30 * diversity_score
+            + 0.20 * count_score
+            + 0.20 * rg_score
+            + 0.15 * finite
+            + 0.10 * spacing_score
+            + 0.05 * candidate_score
+        )
     return round(sum(scores) / len(scores), 6) if scores else -1.0
 
 
@@ -290,12 +332,13 @@ def write_iteration_context(
         "memory_context_path": "memory_context.md",
         "score_proxy_definition": (
             "Internal selection proxy only: validation success, bounded CA diversity, "
-            "requested conformer count coverage, finite coordinates, and candidate count. "
+            "plausible radius of gyration, CA spacing, requested conformer count coverage, "
+            "finite coordinates, and candidate count. "
             "It is not the official hidden score."
         ),
         "code_change_policy": (
             "Code changes are encouraged but not mandatory. Observation-only iterations are valid "
-            "when explicitly justified. The runner records solver_changed for audit."
+            "when explicitly justified in hypothesis.md. Missing hypothesis.md is rejected."
         ),
     }
     (workspace / "iteration_context.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
@@ -410,11 +453,13 @@ def run_agent_iterations(
             solver_changed = write_solver_diff(workspace, iteration, solver_before, solver_after)
             if stopped_for_max_tokens(getattr(result, "events_path", None)):
                 raise RuntimeError("agent response stopped at max_tokens before completing the iteration")
+            hypothesis = load_hypothesis(workspace)
+            if not hypothesis.strip():
+                raise RuntimeError("agent did not write required hypothesis.md")
             report_path = iteration_root / f"iteration_{iteration:02d}"
             report = run_suite(workspace / "solver.py", report_path, solver_rounds, clean=True)
             score = proxy_score(report)
             accepted = bool(report.get("ok")) and score >= best_score
-            hypothesis = load_hypothesis(workspace)
             observation, reflection = reflect_on_iteration(
                 workspace=workspace,
                 iteration=iteration,
