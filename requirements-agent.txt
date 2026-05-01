@@ -1,0 +1,13 @@
+# Optional dependencies proposed by the agent for bounded experiments.
+#
+# Keep this file empty unless an iteration justifies a public dependency from
+# the environment report and records install evidence in notes.md.
+#
+# Preferred lightweight choices:
+# numpy
+# scipy
+# biopython
+# biotite
+# openmm
+#
+# Torch is allowed only when the environment and runtime budget justify it.

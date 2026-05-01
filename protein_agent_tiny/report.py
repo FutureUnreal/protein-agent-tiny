@@ -75,13 +75,13 @@ def build_report(run_dir: Path) -> str:
         ])
         for item in iterations:
             lines.extend([
-                f"- Iteration `{item.get('iteration')}`: accepted=`{item.get('accepted')}`, score_proxy=`{item.get('score')}`, stop_reason=`{item.get('stop_reason')}`",
+                f"- Iteration `{item.get('iteration')}`: accepted=`{item.get('accepted')}`, score_proxy=`{item.get('score')}`, solver_changed=`{item.get('solver_changed')}`, dependency_changed=`{item.get('dependency_changed')}`, stop_reason=`{item.get('stop_reason')}`",
             ])
         lines.append("")
     lines.extend([
         "## Agent Audit",
         "",
-        "`agent.log` is included in `output.zip` as JSONL. It records literature/data policy, approach decisions, hypothesis generation, code evolution, experiment runs, and validation observations.",
+        "`agent.log` is included in `output.zip` as JSONL. It records literature/data policy, environment probing, research planning, hypothesis generation, code and dependency evolution, experiment runs, factual observations, and validation results.",
         "",
     ])
     return "\n".join(lines)

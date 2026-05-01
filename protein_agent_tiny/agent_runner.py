@@ -35,6 +35,9 @@ Engineering constraints:
 - Keep solver.py runnable from CLI.
 - Prefer compact, plausible, finite single-chain conformers with useful diversity.
 - Record your reasoning and code changes in notes.md.
+- You may edit requirements-agent.txt or pyproject.toml and install small public Python
+  dependencies when justified by the environment report, but solver.py must keep a
+  bounded fallback if an optional dependency is unavailable.
 """
 
 
@@ -60,11 +63,14 @@ Data governance:
 Iteration protocol:
 1. Read `iteration_context.json`.
 2. Read `memory_context.md`, `environment_report.md`, and `literature_review.md`.
-3. Cite one relevant prior lesson, environment constraint, or literature implication in `hypothesis.md`.
-4. Write a concise `hypothesis.md` with at most 12 bullet lines.
-5. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
-6. Run a bounded smoke test before finishing when code changed.
-7. Append concise evidence to `notes.md`.
+3. Write `research_plan.md` first. Choose the iteration mode yourself: literature review,
+   environment setup, dependency experiment, modeling, scoring analysis, code evolution,
+   or observation-only audit.
+4. Cite one relevant prior fact, environment constraint, or literature implication in `hypothesis.md`.
+5. Write a concise `hypothesis.md` with at most 12 bullet lines.
+6. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
+7. Run a bounded smoke test before finishing when code changed or dependencies changed.
+8. Append concise evidence to `notes.md`.
 """
 
 
@@ -72,6 +78,8 @@ GOAL_TEMPLATE = """Iteration {iteration} of {total_iterations}: improve this wor
 
 Files available:
 - solver.py: current sequence-only solver. You may edit it.
+- requirements-agent.txt: optional runtime dependency proposal file. You may edit it.
+- pyproject.toml: workspace copy for dependency planning. You may edit it.
 - problems/*.json: official problem inputs.
 - README_AGENT.md: concise task spec.
 - literature_review.md and literature_sources.json: OpenAlex literature retrieval results for architecture inspiration.
@@ -86,9 +94,19 @@ Required behavior:
 - Include final_info.json with pairwise CA-RMSD, compactness, finite-coordinate, candidate-count, and optimization-round fields.
 - Use no forbidden competition structures or trajectories.
 - Keep runtime bounded.
+- Optional dependencies are allowed only when public, lightweight enough for this environment, and not required for a valid fallback.
+- If you edit requirements-agent.txt, install with:
+  python -m pip install -r requirements-agent.txt
+  and record install success or failure in notes.md.
 
-This iteration must explicitly propose one hypothesis. Write it to `hypothesis.md` in at most 12 concise bullet lines.
-Base changes on the prior observations in `iteration_context.json`, available compute in `environment_report.md`, prior lessons in `memory_context.md`, and at least one relevant point from `literature_review.md`; do not blindly rewrite the whole file.
+First write `research_plan.md`. It must state:
+- selected mode for this iteration
+- facts considered from memory, environment, literature, and prior results
+- candidate actions considered
+- chosen action and bounded validation plan
+
+Then explicitly propose one hypothesis. Write it to `hypothesis.md` in at most 12 concise bullet lines.
+Base changes on the prior observations in `iteration_context.json`, available compute in `environment_report.md`, factual observations in `memory_context.md`, and at least one relevant point from `literature_review.md`; do not blindly rewrite the whole file.
 You are allowed to leave `solver.py` unchanged when the iteration is observation-only, but say that explicitly in `hypothesis.md` and final answer.
 
 If you edit `solver.py`, run `python print_sequence.py 1` to get the first sequence, then run:
@@ -104,12 +122,14 @@ class IterationResult:
     accepted: bool
     score: float
     solver_changed: bool
+    dependency_changed: bool
     report_path: str | None
     run_id: str | None
     stop_reason: str | None
     metrics: object
     events_path: str | None
     final_answer: str
+    research_plan: str
     hypothesis: str
     observation: str
     reflection_run_id: str | None = None
@@ -135,6 +155,8 @@ def prepare_workspace(workspace: Path) -> None:
         shutil.rmtree(workspace)
     workspace.mkdir(parents=True)
     shutil.copy2(ROOT / "protein_agent_tiny" / "solver.py", workspace / "solver.py")
+    shutil.copy2(ROOT / "pyproject.toml", workspace / "pyproject.toml")
+    shutil.copy2(ROOT / "requirements-agent.txt", workspace / "requirements-agent.txt")
     shutil.copytree(ROOT / "data" / "problems", workspace / "problems")
     (workspace / "print_sequence.py").write_text(
         "import json, sys\n"
@@ -205,7 +227,7 @@ def build_reflection_agent(workspace: Path, model: str, base_url: str | None):
     system = (
         "You are the reflection phase of a protein ensemble research agent. "
         "You cannot edit files or run tools. Analyze the completed experiment, "
-        "explain what changed, whether the hypothesis was supported, and propose the next bounded step."
+        "explain what changed, whether the hypothesis was supported, and record unresolved factual questions."
     )
     return Agent(
         llm=OpenAIAdapter(model=model, base_url=base_url, max_retries=2),
@@ -320,6 +342,8 @@ def write_iteration_context(
                 "score_proxy": item.score,
                 "accepted": item.accepted,
                 "solver_changed": item.solver_changed,
+                "dependency_changed": item.dependency_changed,
+                "research_plan": item.research_plan[:2000],
                 "hypothesis": item.hypothesis[:2000],
                 "observation": item.observation[:2000],
                 "error": item.error,
@@ -338,10 +362,22 @@ def write_iteration_context(
         ),
         "code_change_policy": (
             "Code changes are encouraged but not mandatory. Observation-only iterations are valid "
-            "when explicitly justified in hypothesis.md. Missing hypothesis.md is rejected."
+            "when explicitly justified in research_plan.md and hypothesis.md. Missing files are rejected."
+        ),
+        "dependency_policy": (
+            "The agent may edit requirements-agent.txt or the workspace pyproject.toml and may run "
+            "python -m pip install -r requirements-agent.txt for small public dependencies. "
+            "solver.py must keep a valid fallback if optional imports fail."
         ),
     }
     (workspace / "iteration_context.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
+
+
+def load_research_plan(workspace: Path) -> str:
+    path = workspace / "research_plan.md"
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")[:6000]
 
 
 def load_hypothesis(workspace: Path) -> str:
@@ -362,6 +398,38 @@ def write_solver_diff(workspace: Path, iteration: int, before: str, after: str) 
     )
     (workspace / f"solver_diff_{iteration:02d}.patch").write_text(diff, encoding="utf-8")
     return bool(diff)
+
+
+def write_dependency_diff(
+    workspace: Path,
+    iteration: int,
+    before: dict[str, str],
+    after: dict[str, str],
+) -> bool:
+    parts: list[str] = []
+    for name in sorted(set(before) | set(after)):
+        if before.get(name, "") == after.get(name, ""):
+            continue
+        parts.append(
+            "".join(
+                difflib.unified_diff(
+                    before.get(name, "").splitlines(keepends=True),
+                    after.get(name, "").splitlines(keepends=True),
+                    fromfile=f"{name}.before.iteration_{iteration:02d}",
+                    tofile=f"{name}.after.iteration_{iteration:02d}",
+                )
+            )
+        )
+    diff = "".join(parts)
+    (workspace / f"dependency_diff_{iteration:02d}.patch").write_text(diff, encoding="utf-8")
+    return bool(diff)
+
+
+def read_dependency_files(workspace: Path) -> dict[str, str]:
+    return {
+        name: (workspace / name).read_text(encoding="utf-8") if (workspace / name).exists() else ""
+        for name in ("requirements-agent.txt", "pyproject.toml")
+    }
 
 
 def stopped_for_max_tokens(events_path: str | None) -> bool:
@@ -414,8 +482,9 @@ def fallback_observation(
         "## Risks\n\n"
         "- The proxy is not the official hidden score and can still overvalue simple geometric diversity.\n"
         "- Sequence-only geometry remains a coarse approximation without learned priors or force-field relaxation.\n\n"
-        "## Next step\n\n"
-        "- Use this observation as memory for the next iteration and prefer bounded, physically plausible changes."
+        "## Open Questions\n\n"
+        "- Which observed metric changes correlate with the official hidden score is unknown.\n"
+        "- Whether optional public dependencies would materially improve the bounded solver is untested in this run."
     )
 
 
@@ -445,8 +514,8 @@ def reflect_on_iteration(
         f"Hypothesis:\n{hypothesis[:3000]}\n\n"
         f"Runner decision: accepted={accepted}, score_proxy={score}, solver_changed={solver_changed}, error={error}\n\n"
         f"Experiment report JSON:\n{json.dumps(compact_report(report), indent=2)}\n\n"
-        "Write a concise observation with these sections: Evidence, Supported/Rejected, Risks, Next step. "
-        "Do not ask to run tools and do not include hidden chain-of-thought."
+        "Write a concise observation with these sections: Evidence, Supported/Rejected, Risks, Open Questions. "
+        "Record facts and uncertainty only; do not prescribe the next strategy and do not include hidden chain-of-thought."
     )
     result = build_reflection_agent(workspace, model, base_url).run_sync(prompt)
     observation = result.final_answer or ""
@@ -479,8 +548,10 @@ def run_agent_iterations(
         report_path: Path | None = None
         error: str | None = None
         solver_changed = False
+        dependency_changed = False
         agent = build_agent(workspace, model, base_url)
         try:
+            dependency_before = read_dependency_files(workspace)
             result = agent.run_sync(
                 GOAL_TEMPLATE.format(
                     iteration=iteration,
@@ -491,8 +562,12 @@ def run_agent_iterations(
             (workspace / f"agent_final_answer_{iteration:02d}.md").write_text(result.final_answer, encoding="utf-8")
             solver_after = (workspace / "solver.py").read_text(encoding="utf-8")
             solver_changed = write_solver_diff(workspace, iteration, solver_before, solver_after)
+            dependency_changed = write_dependency_diff(workspace, iteration, dependency_before, read_dependency_files(workspace))
             if stopped_for_max_tokens(getattr(result, "events_path", None)):
                 raise RuntimeError("agent response stopped at max_tokens before completing the iteration")
+            research_plan = load_research_plan(workspace)
+            if not research_plan.strip():
+                raise RuntimeError("agent did not write required research_plan.md")
             hypothesis = load_hypothesis(workspace)
             if not hypothesis.strip():
                 raise RuntimeError("agent did not write required hypothesis.md")
@@ -521,10 +596,11 @@ def run_agent_iterations(
             score = -1.0
             accepted = False
             error = str(exc)
+            research_plan = load_research_plan(workspace)
             hypothesis = load_hypothesis(workspace)
             observation = (
                 f"Iteration {iteration} failed before a complete accepted experiment. "
-                f"solver_changed={solver_changed}. Error: {error}"
+                f"solver_changed={solver_changed}, dependency_changed={dependency_changed}. Error: {error}"
             )
             reflection = None
             (workspace / f"observation_{iteration:02d}.md").write_text(observation, encoding="utf-8")
@@ -535,12 +611,14 @@ def run_agent_iterations(
             accepted=accepted,
             score=score,
             solver_changed=solver_changed,
+            dependency_changed=dependency_changed,
             report_path=str(report_path) if report_path is not None else None,
             run_id=getattr(result, "run_id", None),
             stop_reason=getattr(result, "stop_reason", None),
             metrics=getattr(result, "metrics", None),
             events_path=getattr(result, "events_path", None),
             final_answer=(getattr(result, "final_answer", "") or "")[:4000],
+            research_plan=research_plan,
             hypothesis=hypothesis,
             observation=observation,
             reflection_run_id=getattr(reflection, "run_id", None),
@@ -570,6 +648,12 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
     for item in history:
         append_log(
             agent_log,
+            "research_planning",
+            iteration=item.iteration,
+            research_plan=item.research_plan,
+        )
+        append_log(
+            agent_log,
             "hypothesis_generation",
             iteration=item.iteration,
             hypothesis=item.hypothesis,
@@ -581,6 +665,7 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             accepted=item.accepted,
             score_proxy=item.score,
             solver_changed=item.solver_changed,
+            dependency_changed=item.dependency_changed,
             run_id=item.run_id,
             stop_reason=item.stop_reason,
             metrics=item.metrics,

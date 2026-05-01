@@ -35,9 +35,9 @@ def append_jsonl(path: Path, item: dict[str, Any]) -> None:
 
 def load_memory(root: Path) -> dict[str, Any]:
     mem = memory_dir(root)
-    lessons_path = mem / "lessons.md"
+    observations_path = mem / "observations.md"
     return {
-        "lessons": lessons_path.read_text(encoding="utf-8") if lessons_path.exists() else "",
+        "observations": observations_path.read_text(encoding="utf-8") if observations_path.exists() else "",
         "recent_runs": read_jsonl(mem / "runs.jsonl", limit=12),
         "best_runs": read_jsonl(mem / "best_runs.jsonl", limit=8),
     }
@@ -45,11 +45,11 @@ def load_memory(root: Path) -> dict[str, Any]:
 
 def render_memory_context(memory: dict[str, Any]) -> str:
     lines = ["# Long-Term Memory", ""]
-    lessons = str(memory.get("lessons") or "").strip()
-    if lessons:
-        lines.extend(["## Lessons", "", lessons[-6000:], ""])
+    observations = str(memory.get("observations") or "").strip()
+    if observations:
+        lines.extend(["## Factual Observations", "", observations[-6000:], ""])
     else:
-        lines.extend(["No prior lessons recorded.", ""])
+        lines.extend(["No prior observations recorded.", ""])
     best_runs = memory.get("best_runs") or []
     if best_runs:
         lines.extend(["## Best Runs", ""])
@@ -107,7 +107,7 @@ def summarize_run(history: list[Any], final_report: dict[str, Any], workspace: P
         "output_zip": final_report.get("output_zip"),
         "validation_ok": final_report.get("ok"),
         "result_metrics": result_metrics,
-        "summary": "Best accepted solver from bounded hypothesis-experiment-reflection run.",
+        "summary": "Factual record from bounded hypothesis-experiment-reflection run.",
     }
 
 
@@ -132,25 +132,35 @@ def update_memory(
     if run_summary["best_score"] >= 0:
         append_jsonl(mem / "best_runs.jsonl", run_summary)
 
-    lessons = [
+    observations = [
         f"## Run {run_summary['timestamp_unix']}",
         "",
         f"- Workspace: `{workspace}`",
         f"- Iterations: `{run_summary['iterations']}`, accepted: `{run_summary['accepted_count']}`, best score: `{run_summary['best_score']}`",
         f"- Literature papers retrieved: `{literature.get('paper_count')}`",
+        f"- Environment: cpu_count=`{run_summary['environment'].get('cpu_count')}`, "
+        f"torch_available=`{run_summary['environment'].get('torch_available')}`, "
+        f"nvidia_smi=`{run_summary['environment'].get('nvidia_smi')}`",
     ]
+    for metric in run_summary["result_metrics"]:
+        observations.append(
+            f"- Problem `{metric.get('problem_id')}` result: pairwise_CA_RMSD_mean="
+            f"`{metric.get('pairwise_ca_rmsd_mean')}`, Rg_mean="
+            f"`{metric.get('radius_of_gyration_mean')}`, candidates=`{metric.get('candidate_count')}`"
+        )
     for item in history[-5:]:
-        lessons.append(
+        observations.append(
             f"- Iteration `{getattr(item, 'iteration', None)}` accepted=`{getattr(item, 'accepted', None)}` "
             f"score=`{getattr(item, 'score', None)}` changed=`{getattr(item, 'solver_changed', None)}` "
+            f"dependency_changed=`{getattr(item, 'dependency_changed', None)}` "
             f"error=`{getattr(item, 'error', None)}`"
         )
         observation = str(getattr(item, "observation", "") or "").strip().replace("\n", " ")
         if observation:
-            lessons.append(f"  Observation: {observation[:600]}")
-    lessons.append("")
-    with (mem / "lessons.md").open("a", encoding="utf-8") as handle:
-        handle.write("\n".join(lessons) + "\n")
+            observations.append(f"  Recorded observation: {observation[:600]}")
+    observations.append("")
+    with (mem / "observations.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(observations) + "\n")
 
     shutil.copy2(workspace / "environment_report.json", mem / "environment_report.json")
     return run_summary

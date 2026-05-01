@@ -5,12 +5,12 @@ Tiny, competition-only agent for AI4S task 3: protein conformational ensemble ge
 It is intentionally not a general research app. There is no frontend and no cross-domain abstraction. The core loop is:
 
 1. Read `data/problems/1.json`, `2.json`, `3.json`.
-2. Load long-term project memory into `memory_context.md`.
+2. Load factual long-term memory into `memory_context.md`.
 3. Probe CPU/GPU/packages into `environment_report.md`.
 4. Retrieve a small OpenAlex literature set into `literature_review.md`.
-5. Optionally run bounded `all-in-agents` hypothesis-experiment-reflection iterations in a workspace.
+5. Optionally run bounded `all-in-agents` research-plan, hypothesis, experiment, and reflection iterations in a workspace.
 6. Keep the best accepted `solver.py` by an internal validation-aware proxy score.
-7. Update long-term memory under `memory/`.
+7. Update factual long-term memory under `memory/`.
 8. Run the solver for all problems.
 9. Package `output.zip`.
 10. Validate submission format.
@@ -56,7 +56,7 @@ outputs/latest/output.zip
 
 ## Agent Improvement Run
 
-This uses `all-in-agents` to run bounded hypothesis-experiment iterations over a workspace copy of `solver.py`, then runs the suite with the best accepted solver.
+This uses `all-in-agents` to run bounded iterations over a workspace copy of the solver, then runs the suite with the best accepted solver.
 
 ```bash
 scripts/run_agent.sh 2 20 1
@@ -68,18 +68,22 @@ Arguments are:
 scripts/run_agent.sh <agent_iterations> <max_minutes_per_iteration> <solver_candidate_rounds>
 ```
 
-Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `memory_context.md`, `environment_report.md`, `literature_review.md`, and `iteration_context.json`, writes a concise `hypothesis.md`, optionally edits `solver.py`, runs experiments, then performs a reflection pass that writes `observation_XX.md`. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` are rejected. The latest agent workspace is under `workspaces/`, long-term lessons are under `memory/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
+Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `memory_context.md`, `environment_report.md`, `literature_review.md`, and `iteration_context.json`, then writes `research_plan.md` before `hypothesis.md`. The plan lets the agent choose its mode for that iteration: literature review, environment setup, dependency experiment, modeling, scoring analysis, code evolution, or observation-only audit.
+
+The workspace also contains `requirements-agent.txt` and a copy of `pyproject.toml`. The agent may edit those files and install small public dependencies with `python -m pip install -r requirements-agent.txt`, but `solver.py` must keep a bounded fallback if optional imports fail. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` or omit `research_plan.md`/`hypothesis.md` are rejected.
+
+The latest agent workspace is under `workspaces/`, factual memory is under `memory/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
 
 ## Memory
 
-Generated memory is local runtime state and is intentionally ignored by git:
+Generated memory is local runtime state and is intentionally ignored by git. It records factual observations, not prescribed next steps:
 
 ```text
 memory/
-├── lessons.md
-├── runs.jsonl
-├── best_runs.jsonl
-└── environment_report.json
+|-- observations.md
+|-- runs.jsonl
+|-- best_runs.jsonl
+`-- environment_report.json
 ```
 
 ## Technical Report
