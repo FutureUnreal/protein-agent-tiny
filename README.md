@@ -34,11 +34,23 @@ It is intentionally not a general research app. There is no frontend and no cros
 
 ```bash
 cd protein-agent-tiny
-scripts/deploy_uv.sh
+bash scripts/bootstrap_server.sh
 ```
 
 Set `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `PROTEIN_AGENT_MODEL` in `.env` or shell environment. `OPENALEX_API_KEY` is optional for literature retrieval.
 For large-context models, `PROTEIN_AGENT_MAX_INPUT_TOKENS` and `PROTEIN_AGENT_MAX_OUTPUT_TOKENS` control the per-call budget passed to `all-in-agents`.
+
+`bootstrap_server.sh` is the server-friendly first-run command. It installs `uv` if needed, syncs `.venv`, creates `.env` only when missing, runs a baseline smoke test, validates `outputs/latest/submission`, and prints the next agent command. To skip the baseline smoke test:
+
+```bash
+RUN_BASELINE=0 bash scripts/bootstrap_server.sh
+```
+
+For day-to-day dependency sync without a smoke test:
+
+```bash
+bash scripts/deploy_uv.sh
+```
 
 ## Fast Baseline
 
