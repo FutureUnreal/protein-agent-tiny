@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .literature import collect_literature
 from .report import build_report
 from .run_suite import DEFAULT_OUTPUT, ROOT, append_log, package_output, run_suite
 from .validate import validate_submission
@@ -56,10 +57,11 @@ Data governance:
 
 Iteration protocol:
 1. Read `iteration_context.json`.
-2. Write a concise `hypothesis.md` with at most 12 bullet lines.
-3. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
-4. Run a bounded smoke test before finishing when code changed.
-5. Append concise evidence to `notes.md`.
+2. Read `literature_review.md` and cite one relevant design implication in `hypothesis.md`.
+3. Write a concise `hypothesis.md` with at most 12 bullet lines.
+4. If the hypothesis requires implementation, edit `solver.py`; observation-only iterations are allowed when justified.
+5. Run a bounded smoke test before finishing when code changed.
+6. Append concise evidence to `notes.md`.
 """
 
 
@@ -69,6 +71,7 @@ Files available:
 - solver.py: current sequence-only solver. You may edit it.
 - problems/*.json: official problem inputs.
 - README_AGENT.md: concise task spec.
+- literature_review.md and literature_sources.json: OpenAlex literature retrieval results for architecture inspiration.
 - iteration_context.json: previous metrics, accepted solver history, and current constraints.
 - .skills/protein-ensemble/SKILL.md: task-specific operating procedure.
 
@@ -80,7 +83,7 @@ Required behavior:
 - Keep runtime bounded.
 
 This iteration must explicitly propose one hypothesis. Write it to `hypothesis.md` in at most 12 concise bullet lines.
-Base changes on the prior observations in `iteration_context.json`; do not blindly rewrite the whole file.
+Base changes on the prior observations in `iteration_context.json` and at least one relevant point from `literature_review.md`; do not blindly rewrite the whole file.
 You are allowed to leave `solver.py` unchanged when the iteration is observation-only, but say that explicitly in `hypothesis.md` and final answer.
 
 If you edit `solver.py`, run `python print_sequence.py 1` to get the first sequence, then run:
@@ -103,6 +106,11 @@ class IterationResult:
     events_path: str | None
     final_answer: str
     hypothesis: str
+    observation: str
+    reflection_run_id: str | None = None
+    reflection_stop_reason: str | None = None
+    reflection_metrics: object = None
+    reflection_events_path: str | None = None
     error: str | None = None
 
 
@@ -173,6 +181,40 @@ def build_agent(workspace: Path, model: str, base_url: str | None):
     )
 
 
+def build_reflection_agent(workspace: Path, model: str, base_url: str | None):
+    from all_in_agents import Agent, Budget, OpenAIAdapter, ToolPolicy, ToolRegistry
+
+    budget = Budget(
+        max_llm_calls=1,
+        max_tool_calls=0,
+        max_wall_ms=180000,
+        max_input_tokens_per_call=int(os.environ.get("PROTEIN_AGENT_MAX_INPUT_TOKENS", "128000")),
+        max_output_tokens_per_call=min(int(os.environ.get("PROTEIN_AGENT_MAX_OUTPUT_TOKENS", "8192")), 4096),
+    )
+    policy = ToolPolicy(
+        require_approval_for=frozenset(),
+        workspace_roots=(workspace.resolve(),),
+        command_denylist=frozenset({"rm", "del", "rmdir"}),
+        sanitize_env=False,
+    )
+    system = (
+        "You are the reflection phase of a protein ensemble research agent. "
+        "You cannot edit files or run tools. Analyze the completed experiment, "
+        "explain what changed, whether the hypothesis was supported, and propose the next bounded step."
+    )
+    return Agent(
+        llm=OpenAIAdapter(model=model, base_url=base_url, max_retries=2),
+        tools=ToolRegistry(),
+        budget=budget,
+        run_dir=str(ROOT / "runs"),
+        system=system,
+        workspace_root=str(workspace),
+        tool_policy=policy,
+        project_root=str(workspace),
+        skills=("protein-ensemble",),
+    )
+
+
 def proxy_score(report: dict[str, object]) -> float:
     if not report.get("ok"):
         return -1.0
@@ -232,10 +274,13 @@ def write_iteration_context(
                 "accepted": item.accepted,
                 "solver_changed": item.solver_changed,
                 "hypothesis": item.hypothesis[:2000],
+                "observation": item.observation[:2000],
                 "error": item.error,
             }
             for item in history
         ],
+        "literature_review_path": "literature_review.md",
+        "literature_sources_path": "literature_sources.json",
         "score_proxy_definition": (
             "Internal selection proxy only: validation success, bounded CA diversity, "
             "requested conformer count coverage, finite coordinates, and candidate count. "
@@ -286,6 +331,41 @@ def stopped_for_max_tokens(events_path: str | None) -> bool:
     return False
 
 
+def reflect_on_iteration(
+    workspace: Path,
+    iteration: int,
+    model: str,
+    base_url: str | None,
+    report: dict[str, object] | None,
+    score: float,
+    accepted: bool,
+    solver_changed: bool,
+    hypothesis: str,
+    error: str | None,
+) -> tuple[str, object | None]:
+    if report is None:
+        observation = (
+            f"Iteration {iteration} produced no complete suite report. "
+            f"accepted={accepted}, score_proxy={score}, solver_changed={solver_changed}, error={error}"
+        )
+        (workspace / f"observation_{iteration:02d}.md").write_text(observation, encoding="utf-8")
+        return observation, None
+
+    prompt = (
+        f"Reflect on iteration {iteration} of the AI4S protein ensemble agent.\n\n"
+        "Literature context is available in literature_review.md and was used during design.\n\n"
+        f"Hypothesis:\n{hypothesis[:3000]}\n\n"
+        f"Runner decision: accepted={accepted}, score_proxy={score}, solver_changed={solver_changed}, error={error}\n\n"
+        f"Experiment report JSON:\n{json.dumps(compact_report(report), indent=2)}\n\n"
+        "Write a concise observation with these sections: Evidence, Supported/Rejected, Risks, Next step. "
+        "Do not ask to run tools and do not include hidden chain-of-thought."
+    )
+    result = build_reflection_agent(workspace, model, base_url).run_sync(prompt)
+    observation = result.final_answer or ""
+    (workspace / f"observation_{iteration:02d}.md").write_text(observation, encoding="utf-8")
+    return observation, result
+
+
 def run_agent_iterations(
     workspace: Path,
     iterations: int,
@@ -327,6 +407,19 @@ def run_agent_iterations(
             report = run_suite(workspace / "solver.py", report_path, solver_rounds, clean=True)
             score = proxy_score(report)
             accepted = bool(report.get("ok")) and score >= best_score
+            hypothesis = load_hypothesis(workspace)
+            observation, reflection = reflect_on_iteration(
+                workspace=workspace,
+                iteration=iteration,
+                model=model,
+                base_url=base_url,
+                report=report,
+                score=score,
+                accepted=accepted,
+                solver_changed=solver_changed,
+                hypothesis=hypothesis,
+                error=None,
+            )
             if accepted:
                 best_score = score
                 shutil.copy2(workspace / "solver.py", best_solver)
@@ -336,6 +429,13 @@ def run_agent_iterations(
             score = -1.0
             accepted = False
             error = str(exc)
+            hypothesis = load_hypothesis(workspace)
+            observation = (
+                f"Iteration {iteration} failed before a complete accepted experiment. "
+                f"solver_changed={solver_changed}. Error: {error}"
+            )
+            reflection = None
+            (workspace / f"observation_{iteration:02d}.md").write_text(observation, encoding="utf-8")
             shutil.copy2(best_solver, workspace / "solver.py")
 
         item = IterationResult(
@@ -349,7 +449,12 @@ def run_agent_iterations(
             metrics=getattr(result, "metrics", None),
             events_path=getattr(result, "events_path", None),
             final_answer=(getattr(result, "final_answer", "") or "")[:4000],
-            hypothesis=load_hypothesis(workspace),
+            hypothesis=hypothesis,
+            observation=observation,
+            reflection_run_id=getattr(reflection, "run_id", None),
+            reflection_stop_reason=getattr(reflection, "stop_reason", None),
+            reflection_metrics=getattr(reflection, "metrics", None),
+            reflection_events_path=getattr(reflection, "events_path", None),
             error=error,
         )
         history.append(item)
@@ -399,8 +504,36 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             score_proxy=item.score,
             solver_changed=item.solver_changed,
             report_path=item.report_path,
+            observation=item.observation,
+            reflection_run_id=item.reflection_run_id,
+            reflection_stop_reason=item.reflection_stop_reason,
+            reflection_metrics=item.reflection_metrics,
+            reflection_events_path=item.reflection_events_path,
             error=item.error,
         )
+
+
+def append_literature_audit(agent_log: Path, literature: dict[str, object]) -> None:
+    append_log(
+        agent_log,
+        "literature_search",
+        summary="OpenAlex literature retrieval completed before agent iteration.",
+        source=literature.get("source"),
+        queries=literature.get("queries"),
+        paper_count=literature.get("paper_count"),
+        papers=[
+            {
+                "title": paper.get("title"),
+                "year": paper.get("year"),
+                "doi": paper.get("doi"),
+                "url": paper.get("url"),
+                "query": paper.get("query"),
+            }
+            for paper in literature.get("papers", [])
+            if isinstance(paper, dict)
+        ][:12],
+        errors=literature.get("errors"),
+    )
 
 
 def main() -> int:
@@ -419,6 +552,7 @@ def main() -> int:
     base_url = os.environ.get("OPENAI_API_BASE")
     workspace = Path(args.workspace) if args.workspace else ROOT / "workspaces" / time.strftime("%Y%m%d_%H%M%S")
     prepare_workspace(workspace)
+    literature = collect_literature(workspace)
 
     history: list[IterationResult] = []
     if not args.skip_agent:
@@ -432,14 +566,21 @@ def main() -> int:
 
     out_root = Path(args.out)
     report = run_suite(workspace / "solver.py", out_root, max(1, args.solver_rounds), clean=True)
+    append_literature_audit(out_root / "submission" / "agent.log", literature)
     if history:
         append_iteration_audit(out_root / "submission" / "agent.log", history)
-        validation = validate_submission(out_root / "submission")
-        package_output(out_root / "submission", out_root / "output.zip")
-        report["validation"] = validation
-        report["ok"] = validation["ok"]
         report["agent_iterations"] = [item.__dict__ for item in history]
-        (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    validation = validate_submission(out_root / "submission")
+    package_output(out_root / "submission", out_root / "output.zip")
+    report["validation"] = validation
+    report["ok"] = validation["ok"]
+    report["literature"] = {
+        "source": literature.get("source"),
+        "paper_count": literature.get("paper_count"),
+        "queries": literature.get("queries"),
+        "errors": literature.get("errors"),
+    }
+    (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_root / "technical_report.md").write_text(build_report(out_root), encoding="utf-8")
     print(json.dumps(report, indent=2))
     return 0 if report["ok"] else 1

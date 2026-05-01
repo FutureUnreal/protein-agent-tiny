@@ -5,12 +5,13 @@ Tiny, competition-only agent for AI4S task 3: protein conformational ensemble ge
 It is intentionally not a general research app. There is no frontend and no cross-domain abstraction. The core loop is:
 
 1. Read `data/problems/1.json`, `2.json`, `3.json`.
-2. Optionally run bounded `all-in-agents` hypothesis-experiment iterations in a workspace.
-3. Keep the best accepted `solver.py` by an internal validation-aware proxy score.
-4. Run the solver for all problems.
-5. Package `output.zip`.
-6. Validate submission format.
-7. Generate a short technical report.
+2. Retrieve a small OpenAlex literature set into `literature_review.md`.
+3. Optionally run bounded `all-in-agents` hypothesis-experiment-reflection iterations in a workspace.
+4. Keep the best accepted `solver.py` by an internal validation-aware proxy score.
+5. Run the solver for all problems.
+6. Package `output.zip`.
+7. Validate submission format.
+8. Generate a short technical report.
 
 `solver.py` is the tiny model artifact by default. If a later agent creates trainable weights, it should write them under `outputs/latest/model/`.
 
@@ -33,7 +34,7 @@ cd protein-agent-tiny
 scripts/deploy_uv.sh
 ```
 
-Set `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `PROTEIN_AGENT_MODEL` in `.env` or shell environment.
+Set `OPENAI_API_KEY`, `OPENAI_API_BASE`, and `PROTEIN_AGENT_MODEL` in `.env` or shell environment. `OPENALEX_API_KEY` is optional for literature retrieval.
 For large-context models, `PROTEIN_AGENT_MAX_INPUT_TOKENS` and `PROTEIN_AGENT_MAX_OUTPUT_TOKENS` control the per-call budget passed to `all-in-agents`.
 
 ## Fast Baseline
@@ -64,7 +65,7 @@ Arguments are:
 scripts/run_agent.sh <agent_iterations> <max_minutes_per_iteration> <solver_candidate_rounds>
 ```
 
-Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `iteration_context.json`, writes a concise `hypothesis.md`, optionally edits `solver.py`, runs experiments, and records whether the solver changed. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` are rejected. The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
+Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `literature_review.md` and `iteration_context.json`, writes a concise `hypothesis.md`, optionally edits `solver.py`, runs experiments, then performs a reflection pass that writes `observation_XX.md`. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` are rejected. The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
 
 ## Technical Report
 

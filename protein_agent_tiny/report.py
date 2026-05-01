@@ -17,9 +17,21 @@ def build_report(run_dir: Path) -> str:
         "- Data policy: sequence input only for competition problems; no competition MD trajectory, crystal structure, or NMR ensemble was used.",
         "- Optional allowed public resources are reserved for future agent improvements: RCSB PDB, AlphaFold DB, UniProt/UniRef/MGnify, public unrelated MD benchmarks.",
         "",
+    ]
+    literature = data.get("literature") or {}
+    if literature:
+        lines.extend([
+            "## Literature",
+            "",
+            f"- Source: `{literature.get('source')}`",
+            f"- Retrieved papers: `{literature.get('paper_count')}`",
+            f"- Queries: `{', '.join(literature.get('queries') or [])}`",
+            "",
+        ])
+    lines.extend([
         "## Results",
         "",
-    ]
+    ])
     for result in data["results"]:
         info = result.get("final_info", {})
         lines.extend([
