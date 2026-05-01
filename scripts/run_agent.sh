@@ -16,9 +16,13 @@ if [ -f .env ]; then
   set +a
 fi
 
-ROUNDS="${1:-2}"
+ITERATIONS="${1:-2}"
 MAX_MINUTES="${2:-20}"
-.venv/bin/python -m protein_agent_tiny.agent_runner --rounds "$ROUNDS" --max-minutes "$MAX_MINUTES"
+SOLVER_ROUNDS="${3:-1}"
+.venv/bin/python -m protein_agent_tiny.agent_runner \
+  --iterations "$ITERATIONS" \
+  --max-minutes "$MAX_MINUTES" \
+  --solver-rounds "$SOLVER_ROUNDS"
 .venv/bin/python -m protein_agent_tiny.validate --submission-dir outputs/latest/submission
 .venv/bin/python -m protein_agent_tiny.report --run-dir outputs/latest
 

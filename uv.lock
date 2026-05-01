@@ -4,11 +4,11 @@ requires-python = ">=3.10"
 
 [[package]]
 name = "all-in-agents"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/75/54/0343456f64db7366e5294639c7fc98fbb9f4e351778e4ca897bb979e60e4/all_in_agents-0.2.0.tar.gz", hash = "sha256:c67bcf4f610c80b30d06cec38862d0e83a5f73f387a6ad0b156b48950cd8513d", size = 35297, upload-time = "2026-05-01T06:57:25.802Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/37/718e727f8e2496114beeb236505c8598a0c3c536f9eca2af82564ec50bae/all_in_agents-0.2.1.tar.gz", hash = "sha256:694b68fe4908f81d3c11b7ebfa854ac0f098b33424321989c8076e8f3555e607", size = 37394, upload-time = "2026-05-01T07:37:34.346Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/81/e095fecd0df747137b29277b5647ae2497aa27d83e3b2bc80ed34249972f/all_in_agents-0.2.0-py3-none-any.whl", hash = "sha256:a28420d8987b715d36e86bad4ec8fbf64c08acf9e070e16ec09ac6bd4fcb5e72", size = 39865, upload-time = "2026-05-01T06:57:24.296Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/76/bd28254a1a954469b0e49e7d649e0f64c0bb22b693fcd5f842188216b55a/all_in_agents-0.2.1-py3-none-any.whl", hash = "sha256:c820b3dd7b5f8ecbf5d97b70e1a18619d9070a82dcf704f1879d26135ef7ddbc", size = 41778, upload-time = "2026-05-01T07:37:33.393Z" },
 ]
 
 [package.optional-dependencies]
@@ -255,7 +255,7 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "all-in-agents", extras = ["openai"], specifier = ">=0.2.0" }]
+requires-dist = [{ name = "all-in-agents", extras = ["openai"], specifier = ">=0.2.1" }]
 
 [[package]]
 name = "pydantic"

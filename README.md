@@ -5,11 +5,12 @@ Tiny, competition-only agent for AI4S task 3: protein conformational ensemble ge
 It is intentionally not a general research app. There is no frontend and no cross-domain abstraction. The core loop is:
 
 1. Read `data/problems/1.json`, `2.json`, `3.json`.
-2. Let a small `all-in-agents` agent optionally improve `protein_agent_tiny/solver.py`.
-3. Run the solver for all problems.
-4. Package `output.zip`.
-5. Validate submission format.
-6. Generate a short technical report.
+2. Optionally run bounded `all-in-agents` hypothesis-experiment iterations in a workspace.
+3. Keep the best accepted `solver.py` by an internal validation-aware proxy score.
+4. Run the solver for all problems.
+5. Package `output.zip`.
+6. Validate submission format.
+7. Generate a short technical report.
 
 `solver.py` is the tiny model artifact by default. If a later agent creates trainable weights, it should write them under `outputs/latest/model/`.
 
@@ -50,13 +51,19 @@ outputs/latest/output.zip
 
 ## Agent Improvement Run
 
-This uses `all-in-agents` to edit a workspace copy of `solver.py`, then runs the suite.
+This uses `all-in-agents` to run bounded hypothesis-experiment iterations over a workspace copy of `solver.py`, then runs the suite with the best accepted solver.
 
 ```bash
-scripts/run_agent.sh 2 20
+scripts/run_agent.sh 2 20 1
 ```
 
-The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
+Arguments are:
+
+```text
+scripts/run_agent.sh <agent_iterations> <max_minutes_per_iteration> <solver_candidate_rounds>
+```
+
+Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `iteration_context.json`, writes `hypothesis.md`, edits `solver.py`, runs experiments, and is accepted only if the validation-aware proxy score does not regress. The latest agent workspace is under `workspaces/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
 
 ## Technical Report
 
@@ -72,6 +79,6 @@ The uv deployment installs the package into `.venv`, so these are equivalent:
 
 ```bash
 .venv/bin/python -m protein_agent_tiny.run_suite --clean --rounds 1
-.venv/bin/python -m protein_agent_tiny.agent_runner --rounds 2 --max-minutes 20
+.venv/bin/python -m protein_agent_tiny.agent_runner --iterations 2 --max-minutes 20 --solver-rounds 1
 .venv/bin/python -m protein_agent_tiny.validate --submission-dir outputs/latest/submission
 ```

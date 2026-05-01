@@ -32,10 +32,21 @@ def build_report(run_dir: Path) -> str:
             f"- Runtime seconds: `{info.get('runtime_seconds')}`",
             "",
         ])
+    iterations = data.get("agent_iterations") or []
+    if iterations:
+        lines.extend([
+            "## Agent Iterations",
+            "",
+        ])
+        for item in iterations:
+            lines.extend([
+                f"- Iteration `{item.get('iteration')}`: accepted=`{item.get('accepted')}`, score_proxy=`{item.get('score')}`, stop_reason=`{item.get('stop_reason')}`",
+            ])
+        lines.append("")
     lines.extend([
         "## Agent Audit",
         "",
-        "`agent.log` is included in `output.zip` as JSONL. It records literature/data policy, approach decisions, code evolution, experiment runs, and validation observations.",
+        "`agent.log` is included in `output.zip` as JSONL. It records literature/data policy, approach decisions, hypothesis generation, code evolution, experiment runs, and validation observations.",
         "",
     ])
     return "\n".join(lines)
