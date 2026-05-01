@@ -381,6 +381,44 @@ def stopped_for_max_tokens(events_path: str | None) -> bool:
     return False
 
 
+def fallback_observation(
+    iteration: int,
+    report: dict[str, object],
+    score: float,
+    accepted: bool,
+    solver_changed: bool,
+    hypothesis: str,
+    error: str | None,
+) -> str:
+    metrics = []
+    for item in compact_report(report).get("results", []):
+        info = item.get("final_info", {}) if isinstance(item, dict) else {}
+        if not isinstance(info, dict):
+            continue
+        metrics.append(
+            f"- Problem `{item.get('problem_id')}`: pairwise_CA_RMSD_mean="
+            f"`{info.get('pairwise_ca_rmsd_mean')}`, Rg_mean=`{info.get('radius_of_gyration_mean')}`, "
+            f"conformers=`{info.get('num_conformers_generated')}`, finite=`{info.get('coordinate_finite')}`"
+        )
+    evidence = "\n".join(metrics) if metrics else "- No per-problem metrics were available."
+    status = "supported" if accepted else "not supported"
+    changed = "changed" if solver_changed else "did not change"
+    return (
+        "## Evidence\n\n"
+        f"- Iteration `{iteration}` {changed} `solver.py` and produced score proxy `{score}`.\n"
+        f"- Runner accepted: `{accepted}`. Error: `{error}`.\n"
+        f"{evidence}\n\n"
+        "## Supported/Rejected\n\n"
+        f"The hypothesis was `{status}` by the bounded internal proxy. "
+        f"Hypothesis excerpt: {hypothesis.strip()[:500] or 'No hypothesis text recorded.'}\n\n"
+        "## Risks\n\n"
+        "- The proxy is not the official hidden score and can still overvalue simple geometric diversity.\n"
+        "- Sequence-only geometry remains a coarse approximation without learned priors or force-field relaxation.\n\n"
+        "## Next step\n\n"
+        "- Use this observation as memory for the next iteration and prefer bounded, physically plausible changes."
+    )
+
+
 def reflect_on_iteration(
     workspace: Path,
     iteration: int,
@@ -412,6 +450,8 @@ def reflect_on_iteration(
     )
     result = build_reflection_agent(workspace, model, base_url).run_sync(prompt)
     observation = result.final_answer or ""
+    if not observation.strip() or stopped_for_max_tokens(getattr(result, "events_path", None)):
+        observation = fallback_observation(iteration, report, score, accepted, solver_changed, hypothesis, error)
     (workspace / f"observation_{iteration:02d}.md").write_text(observation, encoding="utf-8")
     return observation, result
 
