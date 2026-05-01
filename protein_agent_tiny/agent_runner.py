@@ -336,6 +336,7 @@ def write_iteration_context(
         "iteration": iteration,
         "total_iterations": total_iterations,
         "best_score_proxy": best_score,
+        "baseline_result_path": "baseline_result.json",
         "accepted_history": [
             {
                 "iteration": item.iteration,
@@ -535,9 +536,14 @@ def run_agent_iterations(
     history: list[IterationResult] = []
     best_solver = workspace / "best_solver.py"
     shutil.copy2(workspace / "solver.py", best_solver)
-    best_score = -1.0
     iteration_root = workspace / "iteration_runs"
     iteration_root.mkdir(parents=True, exist_ok=True)
+    baseline_report = run_suite(workspace / "solver.py", iteration_root / "baseline", solver_rounds, clean=True)
+    best_score = proxy_score(baseline_report)
+    (workspace / "baseline_result.json").write_text(
+        json.dumps(compact_report(baseline_report), indent=2),
+        encoding="utf-8",
+    )
 
     for iteration in range(1, iterations + 1):
         shutil.copy2(best_solver, workspace / "solver.py")
