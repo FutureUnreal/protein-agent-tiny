@@ -40,6 +40,7 @@ def load_memory(root: Path) -> dict[str, Any]:
         "observations": observations_path.read_text(encoding="utf-8") if observations_path.exists() else "",
         "recent_runs": read_jsonl(mem / "runs.jsonl", limit=12),
         "best_runs": read_jsonl(mem / "best_runs.jsonl", limit=8),
+        "official_scores": read_jsonl(mem / "scores.jsonl", limit=12),
     }
 
 
@@ -66,6 +67,16 @@ def render_memory_context(memory: dict[str, Any]) -> str:
             lines.append(
                 f"- `{run.get('timestamp_unix')}` iterations=`{run.get('iterations')}` "
                 f"best_score=`{run.get('best_score')}` accepted=`{run.get('accepted_count')}`"
+            )
+        lines.append("")
+    official_scores = memory.get("official_scores") or []
+    if official_scores:
+        lines.extend(["## Official Score Feedback", ""])
+        for item in official_scores[-5:]:
+            lines.append(
+                f"- `{item.get('timestamp_unix')}` score=`{item.get('score')}` "
+                f"score1=`{item.get('score1')}` score2=`{item.get('score2')}` "
+                f"success=`{item.get('success')}` notes=`{item.get('notes')}`"
             )
         lines.append("")
     return "\n".join(lines)

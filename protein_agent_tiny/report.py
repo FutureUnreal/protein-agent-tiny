@@ -13,6 +13,7 @@ def build_report(run_dir: Path) -> str:
         "## Summary",
         "",
         f"- Submission archive: `{data['output_zip']}`",
+        f"- Archived snapshot: `{data.get('archive_dir')}`",
         f"- Validation: `{data['ok']}`",
         "- Data policy: sequence input only for competition problems; no competition MD trajectory, crystal structure, or NMR ensemble was used.",
         "- Optional allowed public resources are reserved for future agent improvements: RCSB PDB, AlphaFold DB, UniProt/UniRef/MGnify, public unrelated MD benchmarks.",
@@ -74,8 +75,9 @@ def build_report(run_dir: Path) -> str:
             "",
         ])
         for item in iterations:
+            hard_gate = ((item.get("report") or {}).get("hard_gate_violations") or []) if isinstance(item.get("report"), dict) else []
             lines.extend([
-                f"- Iteration `{item.get('iteration')}`: accepted=`{item.get('accepted')}`, score_proxy=`{item.get('score')}`, solver_changed=`{item.get('solver_changed')}`, dependency_changed=`{item.get('dependency_changed')}`, stop_reason=`{item.get('stop_reason')}`",
+                f"- Iteration `{item.get('iteration')}`: accepted=`{item.get('accepted')}`, score_proxy=`{item.get('score')}`, solver_changed=`{item.get('solver_changed')}`, dependency_changed=`{item.get('dependency_changed')}`, stop_reason=`{item.get('stop_reason')}`, hard_gate_violations=`{hard_gate}`",
             ])
         lines.append("")
     lines.extend([

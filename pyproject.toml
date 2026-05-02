@@ -17,6 +17,8 @@ protein-tiny-run = "protein_agent_tiny.run_suite:main"
 protein-tiny-agent = "protein_agent_tiny.agent_runner:main"
 protein-tiny-validate = "protein_agent_tiny.validate:main"
 protein-tiny-report = "protein_agent_tiny.report:main"
+protein-tiny-archive = "protein_agent_tiny.archive:main"
+protein-tiny-record-score = "protein_agent_tiny.score:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["protein_agent_tiny"]

@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .archive import archive_output
 from .environment import write_environment_report
 from .literature import collect_literature
 from .memory import update_memory, write_memory_context
@@ -269,7 +270,48 @@ def ca_spacing_score(min_distance: float, max_distance: float) -> float:
     return max(0.0, 1.0 - (low_error + high_error) / 0.8)
 
 
+def hard_gate_violations(report: dict[str, object]) -> list[str]:
+    violations: list[str] = []
+    if not report.get("ok"):
+        violations.append("suite_not_ok")
+    results = report.get("results", [])
+    if not isinstance(results, list) or not results:
+        return violations + ["missing_results"]
+    for result in results:
+        if not isinstance(result, dict):
+            violations.append("malformed_result")
+            continue
+        problem_id = result.get("problem_id")
+        info = result.get("final_info", {})
+        if not isinstance(info, dict):
+            violations.append(f"{problem_id}:missing_final_info")
+            continue
+        sequence_length = float(info.get("sequence_length") or 0.0)
+        generated = float(info.get("num_conformers_generated") or 0.0)
+        rg = float(info.get("radius_of_gyration_mean") or 0.0)
+        diversity = float(info.get("pairwise_ca_rmsd_mean") or 0.0)
+        min_ca = float(info.get("min_ca_distance") or 0.0)
+        max_ca = float(info.get("max_ca_distance") or 0.0)
+        rg_limit = max(220.0, 8.0 * (sequence_length ** 0.52)) if sequence_length > 0 else 220.0
+        rmsd_limit = max(120.0, 4.0 * rg_limit)
+        if generated <= 0:
+            violations.append(f"{problem_id}:no_conformers")
+        if not info.get("coordinate_finite"):
+            violations.append(f"{problem_id}:nonfinite_coordinates")
+        if rg <= 0 or rg > rg_limit:
+            violations.append(f"{problem_id}:implausible_rg:{rg:.3f}>{rg_limit:.3f}")
+        if diversity < 0 or diversity > rmsd_limit:
+            violations.append(f"{problem_id}:implausible_pairwise_rmsd:{diversity:.3f}>{rmsd_limit:.3f}")
+        if min_ca and min_ca < 2.7:
+            violations.append(f"{problem_id}:ca_spacing_too_short:{min_ca:.3f}")
+        if max_ca and max_ca > 5.2:
+            violations.append(f"{problem_id}:ca_spacing_too_long:{max_ca:.3f}")
+    return violations
+
+
 def proxy_score(report: dict[str, object]) -> float:
+    if hard_gate_violations(report):
+        return -1.0
     if not report.get("ok"):
         return -1.0
     results = report.get("results", [])
@@ -313,6 +355,7 @@ def compact_report(report: dict[str, object]) -> dict[str, object]:
     return {
         "ok": report.get("ok"),
         "score_proxy": proxy_score(report),
+        "hard_gate_violations": hard_gate_violations(report),
         "results": [
             {
                 "problem_id": item.get("problem_id"),
@@ -360,6 +403,11 @@ def write_iteration_context(
             "plausible radius of gyration, CA spacing, requested conformer count coverage, "
             "finite coordinates, and candidate count. "
             "It is not the official hidden score."
+        ),
+        "hard_gate_definition": (
+            "Experiments with missing output, nonfinite coordinates, no conformers, extreme radius "
+            "of gyration, extreme pairwise RMSD, or gross CA spacing violations are rejected before "
+            "proxy scoring."
         ),
         "code_change_policy": (
             "Code changes are encouraged but not mandatory. Observation-only iterations are valid "
@@ -580,7 +628,8 @@ def run_agent_iterations(
             report_path = iteration_root / f"iteration_{iteration:02d}"
             report = run_suite(workspace / "solver.py", report_path, solver_rounds, clean=True)
             score = proxy_score(report)
-            accepted = bool(report.get("ok")) and score >= best_score
+            violations = hard_gate_violations(report)
+            accepted = bool(report.get("ok")) and not violations and score >= best_score
             observation, reflection = reflect_on_iteration(
                 workspace=workspace,
                 iteration=iteration,
@@ -808,6 +857,12 @@ def main() -> int:
     report["memory_summary"] = memory_summary
     (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_root / "technical_report.md").write_text(build_report(out_root), encoding="utf-8")
+    archive_dir = archive_output(out_root)
+    report["archive_dir"] = str(archive_dir)
+    (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    (out_root / "technical_report.md").write_text(build_report(out_root), encoding="utf-8")
+    shutil.copy2(out_root / "run_report.json", archive_dir / "run_report.json")
+    shutil.copy2(out_root / "technical_report.md", archive_dir / "technical_report.md")
     print(json.dumps(report, indent=2))
     return 0 if report["ok"] else 1
 

@@ -85,6 +85,29 @@ Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.m
 The workspace also contains `requirements-agent.txt` and a copy of `pyproject.toml`. The agent may edit those files and install small public dependencies with `python -m pip install -r requirements-agent.txt`, but `solver.py` must keep a bounded fallback if optional imports fail. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` or omit `research_plan.md`/`hypothesis.md` are rejected.
 
 The latest agent workspace is under `workspaces/`, factual memory is under `memory/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
+Every baseline or agent run also writes a timestamped snapshot under `outputs/archive/` so a later run does not overwrite the last usable package.
+
+The runner uses an internal proxy score only for local selection. Experiments with missing outputs, nonfinite coordinates, no conformers, extreme radius of gyration, extreme pairwise RMSD, or gross CA spacing violations are hard-rejected before proxy comparison.
+
+## Official Score Feedback
+
+After submitting `output.zip`, record the official result so future agent runs can see real feedback in `memory_context.md`:
+
+```bash
+bash scripts/record_score.sh --score 0.85 --score1 0.87 --score2 0.88 --success true --notes "leaderboard trial"
+```
+
+Or paste the raw official JSON:
+
+```bash
+bash scripts/record_score.sh --score-json '{"score":0.85,"scoreJson":{"score1":0.87,"score2":0.88},"success":true,"errorMsg":""}'
+```
+
+On shells where JSON quoting is awkward, put the official response in a file:
+
+```bash
+bash scripts/record_score.sh --score-json-file official_score.json
+```
 
 ## Memory
 
@@ -95,6 +118,7 @@ memory/
 |-- observations.md
 |-- runs.jsonl
 |-- best_runs.jsonl
+|-- scores.jsonl
 `-- environment_report.json
 ```
 
