@@ -9,7 +9,7 @@ description = "Tiny AI4S protein ensemble competition agent"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "all-in-agents[openai]>=0.2.1",
+  "all-in-agents[openai]>=0.2.3",
 ]
 
 [project.scripts]
