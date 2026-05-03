@@ -130,6 +130,7 @@ class IterationResult:
     metrics: object
     events_path: str | None
     final_answer: str
+    artifact_validation: object
     research_plan: str
     hypothesis: str
     observation: str
@@ -173,7 +174,7 @@ def prepare_workspace(workspace: Path) -> None:
 
 
 def build_agent(workspace: Path, model: str, base_url: str | None):
-    from all_in_agents import Agent, Budget, BUILTIN_TOOLS, OpenAIAdapter, ToolPolicy, ToolRegistry, unsafe_defaults
+    from all_in_agents import Agent, ArtifactContract, ArtifactSpec, Budget, BUILTIN_TOOLS, OpenAIAdapter, ToolPolicy, ToolRegistry, unsafe_defaults
 
     from .tools import validate_submission_tool
 
@@ -196,6 +197,12 @@ def build_agent(workspace: Path, model: str, base_url: str | None):
         sanitize_env=False,
     )
     llm = OpenAIAdapter(model=model, base_url=base_url, max_retries=2)
+    artifact_contract = ArtifactContract((
+        ArtifactSpec("research_plan.md", min_bytes=200, description="Iteration research plan."),
+        ArtifactSpec("hypothesis.md", min_bytes=80, description="Concise iteration hypothesis."),
+        ArtifactSpec("notes.md", min_bytes=20, description="Evidence and smoke-test notes."),
+        ArtifactSpec("solver.py", min_bytes=1000, description="Runnable solver artifact."),
+    ))
     return Agent(
         llm=llm,
         tools=registry,
@@ -206,6 +213,7 @@ def build_agent(workspace: Path, model: str, base_url: str | None):
         tool_policy=policy,
         project_root=str(workspace),
         skills=("protein-ensemble",),
+        artifact_contract=artifact_contract,
     )
 
 
@@ -673,6 +681,7 @@ def run_agent_iterations(
             metrics=getattr(result, "metrics", None),
             events_path=getattr(result, "events_path", None),
             final_answer=(getattr(result, "final_answer", "") or "")[:4000],
+            artifact_validation=getattr(result, "artifact_validation", None),
             research_plan=research_plan,
             hypothesis=hypothesis,
             observation=observation,
@@ -726,6 +735,7 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             metrics=item.metrics,
             events_path=item.events_path,
             final_answer=item.final_answer,
+            artifact_validation=item.artifact_validation,
             error=item.error,
         )
         append_log(
