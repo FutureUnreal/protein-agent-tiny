@@ -2,8 +2,12 @@ __pycache__/
 *.pyc
 .venv/
 .env
+downloads/
+logs/
 runs/
 workspaces/
 outputs/
 memory/
+*.log
+*.zip
 *.egg-info/
