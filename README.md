@@ -82,7 +82,7 @@ scripts/run_agent.sh <agent_iterations> <max_minutes_per_iteration> <solver_cand
 
 Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `memory_context.md`, `environment_report.md`, `literature_review.md`, and `iteration_context.json`, then writes `research_plan.md` before `hypothesis.md`. The plan lets the agent choose its mode for that iteration: literature review, environment setup, dependency experiment, modeling, scoring analysis, code evolution, or observation-only audit.
 
-The workspace also contains `requirements-agent.txt` and a copy of `pyproject.toml`. The agent may edit those files and install small public dependencies with `python -m pip install -r requirements-agent.txt`, but `solver.py` must keep a bounded fallback if optional imports fail. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` or omit `research_plan.md`/`hypothesis.md` are rejected.
+The workspace also contains a copy of `pyproject.toml`, which is the only dependency manifest. The agent may edit it when public dependencies are justified by `environment_report.md`, but `solver.py` must keep a bounded fallback if optional imports fail. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` or omit `research_plan.md`/`hypothesis.md` are rejected.
 
 The latest agent workspace is under `workspaces/`, factual memory is under `memory/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
 Every baseline or agent run also writes a timestamped snapshot under `outputs/archive/` so a later run does not overwrite the last usable package.

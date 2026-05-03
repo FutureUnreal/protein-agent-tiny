@@ -36,9 +36,9 @@ Engineering constraints:
 - Keep solver.py runnable from CLI.
 - Prefer compact, plausible, finite single-chain conformers with useful diversity.
 - Record your reasoning and code changes in notes.md.
-- You may edit requirements-agent.txt or pyproject.toml and install small public Python
-  dependencies when justified by the environment report, but solver.py must keep a
-  bounded fallback if an optional dependency is unavailable.
+- `pyproject.toml` is the only dependency manifest. You may edit it and install
+  public Python dependencies when justified by the environment report, but solver.py
+  must keep a bounded fallback if an optional dependency is unavailable.
 """
 
 
@@ -79,8 +79,7 @@ GOAL_TEMPLATE = """Iteration {iteration} of {total_iterations}: improve this wor
 
 Files available:
 - solver.py: current sequence-only solver. You may edit it.
-- requirements-agent.txt: optional runtime dependency proposal file. You may edit it.
-- pyproject.toml: workspace copy for dependency planning. You may edit it.
+- pyproject.toml: the only dependency manifest. You may edit it for dependency planning.
 - problems/*.json: official problem inputs.
 - README_AGENT.md: concise task spec.
 - literature_review.md and literature_sources.json: OpenAlex literature retrieval results for architecture inspiration.
@@ -95,10 +94,8 @@ Required behavior:
 - Include final_info.json with pairwise CA-RMSD, compactness, finite-coordinate, candidate-count, and optimization-round fields.
 - Use no forbidden competition structures or trajectories.
 - Keep runtime bounded.
-- Optional dependencies are allowed only when public, lightweight enough for this environment, and not required for a valid fallback.
-- If you edit requirements-agent.txt, install with:
-  python -m pip install -r requirements-agent.txt
-  and record install success or failure in notes.md.
+- Optional dependencies are allowed only when public, appropriate for this environment, and not required for a valid fallback.
+- If you edit pyproject.toml, record the dependency rationale in notes.md and run a bounded import/smoke test.
 
 First write `research_plan.md`. It must state:
 - selected mode for this iteration
@@ -158,7 +155,6 @@ def prepare_workspace(workspace: Path) -> None:
     workspace.mkdir(parents=True)
     shutil.copy2(ROOT / "protein_agent_tiny" / "solver.py", workspace / "solver.py")
     shutil.copy2(ROOT / "pyproject.toml", workspace / "pyproject.toml")
-    shutil.copy2(ROOT / "requirements-agent.txt", workspace / "requirements-agent.txt")
     shutil.copytree(ROOT / "data" / "problems", workspace / "problems")
     (workspace / "print_sequence.py").write_text(
         "import json, sys\n"
@@ -422,9 +418,10 @@ def write_iteration_context(
             "when explicitly justified in research_plan.md and hypothesis.md. Missing files are rejected."
         ),
         "dependency_policy": (
-            "The agent may edit requirements-agent.txt or the workspace pyproject.toml and may run "
-            "python -m pip install -r requirements-agent.txt for small public dependencies. "
-            "solver.py must keep a valid fallback if optional imports fail."
+            "The workspace pyproject.toml is the only dependency manifest. The agent may edit it "
+            "for public dependencies justified by environment_report.md, and must run a bounded "
+            "import/smoke test when dependencies change. solver.py must keep a valid fallback if "
+            "optional imports fail."
         ),
     }
     (workspace / "iteration_context.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
@@ -485,7 +482,7 @@ def write_dependency_diff(
 def read_dependency_files(workspace: Path) -> dict[str, str]:
     return {
         name: (workspace / name).read_text(encoding="utf-8") if (workspace / name).exists() else ""
-        for name in ("requirements-agent.txt", "pyproject.toml")
+        for name in ("pyproject.toml",)
     }
 
 
