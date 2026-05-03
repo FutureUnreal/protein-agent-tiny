@@ -7,7 +7,9 @@ import subprocess
 import sys
 import time
 import zipfile
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from .problems import Problem, load_problems
 from .validate import validate_submission
@@ -17,8 +19,44 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "outputs" / "latest"
 
 
+@lru_cache(maxsize=1)
+def competition_sequences() -> tuple[tuple[str, str], ...]:
+    return tuple((problem.problem_id, problem.sequence) for problem in load_problems())
+
+
+def sanitize_log_text(value: str) -> str:
+    text = value
+    project_root = ROOT.resolve()
+    path_variants = {
+        str(project_root),
+        project_root.as_posix(),
+        str(project_root).replace("\\", "/"),
+    }
+    for variant in sorted(path_variants, key=len, reverse=True):
+        if variant:
+            text = text.replace(variant, "<PROJECT_ROOT>")
+    for problem_id, sequence in competition_sequences():
+        if len(sequence) >= 20:
+            text = text.replace(sequence, f"<PROBLEM_{problem_id}_SEQUENCE_LEN_{len(sequence)}>")
+    return text
+
+
+def sanitize_for_log(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_log_text(value)
+    if isinstance(value, Path):
+        return sanitize_log_text(str(value))
+    if isinstance(value, dict):
+        return {key: sanitize_for_log(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [sanitize_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_for_log(item) for item in value]
+    return value
+
+
 def append_log(path: Path, event_type: str, **payload: object) -> None:
-    event = {"event_type": event_type, "timestamp_unix": int(time.time()), **payload}
+    event = sanitize_for_log({"event_type": event_type, "timestamp_unix": int(time.time()), **payload})
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
@@ -38,6 +76,18 @@ def solver_command(solver: Path, problem: Problem, out_dir: Path, rounds: int) -
         "--out-dir",
         str(out_dir),
     ]
+
+
+def solver_command_summary(solver: Path, problem: Problem, out_dir: Path, rounds: int) -> dict[str, object]:
+    return {
+        "python": Path(sys.executable).name,
+        "solver": str(solver),
+        "problem_id": problem.problem_id,
+        "sequence_length": len(problem.sequence),
+        "num_conformers": min(problem.conformer_count, 10),
+        "optimization_rounds": max(1, rounds),
+        "out_dir": str(out_dir),
+    }
 
 
 def package_output(submission_dir: Path, output_zip: Path) -> None:
@@ -95,7 +145,7 @@ def run_suite(solver: Path, out_root: Path, rounds: int, clean: bool = False) ->
             agent_log,
             "experiment_run",
             problem_id=problem.problem_id,
-            command=" ".join(command),
+            command_summary=solver_command_summary(solver, problem, run_dir, rounds),
             returncode=proc.returncode,
             elapsed_seconds=elapsed,
             final_info=final_info,
@@ -107,12 +157,17 @@ def run_suite(solver: Path, out_root: Path, rounds: int, clean: bool = False) ->
         results.append({"problem_id": problem.problem_id, "elapsed_seconds": elapsed, "final_info": final_info})
 
     validation = validate_submission(submission_dir)
+    file_validation = {
+        "ok": bool(validation.get("files")) and all(bool(item.get("ok")) for item in validation.get("files", []) if isinstance(item, dict)),
+        "files": validation.get("files", []),
+        "agent_log": "validated after appending experiment_observation",
+    }
     append_log(
         agent_log,
         "experiment_observation",
-        summary="Validated official submission directory after running all problems.",
-        validation_ok=validation["ok"],
-        validation=validation,
+        summary="Validated generated CIF files after running all problems.",
+        validation_ok=file_validation["ok"],
+        validation=file_validation,
     )
     validation = validate_submission(submission_dir)
     output_zip = out_root / "output.zip"
