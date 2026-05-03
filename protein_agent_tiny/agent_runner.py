@@ -96,6 +96,7 @@ Required behavior:
 - Keep runtime bounded.
 - Optional dependencies are allowed only when public, appropriate for this environment, and not required for a valid fallback.
 - If you edit pyproject.toml, record the dependency rationale in notes.md and run a bounded import/smoke test.
+- Keep final responses concise. Do not paste long code, long command output, or full JSON into the final answer.
 
 First write `research_plan.md`. It must state:
 - selected mode for this iteration
@@ -135,6 +136,7 @@ class IterationResult:
     reflection_stop_reason: str | None = None
     reflection_metrics: object = None
     reflection_events_path: str | None = None
+    warnings: list[str] | None = None
     error: str | None = None
 
 
@@ -608,6 +610,7 @@ def run_agent_iterations(
         error: str | None = None
         solver_changed = False
         dependency_changed = False
+        warnings: list[str] = []
         agent = build_agent(workspace, model, base_url)
         try:
             dependency_before = read_dependency_files(workspace)
@@ -622,8 +625,9 @@ def run_agent_iterations(
             solver_after = (workspace / "solver.py").read_text(encoding="utf-8")
             solver_changed = write_solver_diff(workspace, iteration, solver_before, solver_after)
             dependency_changed = write_dependency_diff(workspace, iteration, dependency_before, read_dependency_files(workspace))
-            if stopped_for_max_tokens(getattr(result, "events_path", None)):
-                raise RuntimeError("agent response stopped at max_tokens before completing the iteration")
+            hit_max_tokens = stopped_for_max_tokens(getattr(result, "events_path", None))
+            if hit_max_tokens:
+                warnings.append("agent response hit max_tokens after required artifacts were present; experiment was still evaluated")
             research_plan = load_research_plan(workspace)
             if not research_plan.strip():
                 raise RuntimeError("agent did not write required research_plan.md")
@@ -686,6 +690,7 @@ def run_agent_iterations(
             reflection_stop_reason=getattr(reflection, "stop_reason", None),
             reflection_metrics=getattr(reflection, "metrics", None),
             reflection_events_path=getattr(reflection, "events_path", None),
+            warnings=warnings,
             error=error,
         )
         history.append(item)
@@ -733,6 +738,7 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             events_path=item.events_path,
             final_answer=item.final_answer,
             artifact_validation=item.artifact_validation,
+            warnings=item.warnings,
             error=item.error,
         )
         append_log(
@@ -748,6 +754,7 @@ def append_iteration_audit(agent_log: Path, history: list[IterationResult]) -> N
             reflection_stop_reason=item.reflection_stop_reason,
             reflection_metrics=item.reflection_metrics,
             reflection_events_path=item.reflection_events_path,
+            warnings=item.warnings,
             error=item.error,
         )
 
