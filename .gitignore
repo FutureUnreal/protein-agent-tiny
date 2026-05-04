@@ -11,3 +11,21 @@ memory/
 *.log
 *.zip
 *.egg-info/
+.ace-tool/
+
+# Test and coverage runtime artifacts (source under tests/ stays tracked)
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Claude Code: keep design docs under .claude/team-plan/, ignore local settings
+.claude/
+
+# Agent-produced artifacts must never be re-added
+protein_agent_tiny/solver.py
+protein_agent_tiny/solver_pkg/
+PARTICIPANT_GUIDE.md

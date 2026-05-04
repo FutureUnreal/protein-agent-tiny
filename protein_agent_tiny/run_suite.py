@@ -62,8 +62,11 @@ def append_log(path: Path, event_type: str, **payload: object) -> None:
 
 
 def solver_command(solver: Path, problem: Problem, out_dir: Path, rounds: int) -> list[str]:
+    # Solver subprocess uses the resolved solver Python (host system if it has
+    # the scientific stack, .venv otherwise). See runtime.solver_env.
+    from .runtime.solver_env import resolve_solver_python
     return [
-        sys.executable,
+        resolve_solver_python().python,
         str(solver),
         "--problem-id",
         problem.problem_id,

@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
   "all-in-agents[openai]>=0.2.4",
   "torch>=2.2.0,<2.7",
+  "numpy>=1.26",
 ]
 
 [project.scripts]
@@ -23,3 +24,6 @@ protein-tiny-record-score = "protein_agent_tiny.score:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["protein_agent_tiny"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
