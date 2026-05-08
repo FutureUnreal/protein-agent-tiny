@@ -48,6 +48,15 @@ After writing the package, run a smoke test:
 When the smoke test produces valid CIF files, write `ready\n` (or any non-empty content) to `solver_pkg/.pipeline_ready`. The sentinel must NOT be empty — the artifact contract requires at least one byte.
 """
 
+GOAL_BOOTSTRAP_RETRY = """
+
+## Previous bootstrap attempt failed
+
+Read `bootstrap_feedback.md` first. The previous attempt did not satisfy the required artifact contract or smoke test.
+You must directly fix the listed missing/broken files before doing any optional research or refactor.
+Do not finish until `solver_pkg/cli.py` exists, `solver_pkg/pipeline.py` exists, and the smoke test produces at least one `*_pred.cif`.
+"""
+
 GOAL_IMPROVE = """Iteration {iteration} of {total_iterations} for the AI4S protein ensemble competition.
 
 A working solver_pkg/ exists. Read it and the iteration_context.json, then make a MINIMAL bounded change.
@@ -122,6 +131,79 @@ def _accept_bootstrap_pipeline(workspace: Path, sample_sequence: str) -> bool:
     sentinel.write_text("ready\n", encoding="utf-8")
     _write_workspace_solver_shim(workspace)
     return True
+
+
+def _bootstrap_file_status(workspace: Path) -> list[str]:
+    specs = (
+        ("research_plan.md", 200),
+        ("hypothesis.md", 80),
+        ("notes.md", 20),
+        ("solver_pkg/cli.py", 200),
+        ("solver_pkg/pipeline.py", 200),
+        ("solver_pkg/.pipeline_ready", 1),
+    )
+    lines = []
+    for rel, min_bytes in specs:
+        path = workspace / rel
+        if not path.exists():
+            lines.append(f"- MISSING `{rel}` (required min_bytes={min_bytes})")
+            continue
+        size = path.stat().st_size
+        state = "OK" if size >= min_bytes else "TOO_SMALL"
+        lines.append(f"- {state} `{rel}` ({size} bytes, required min_bytes={min_bytes})")
+    return lines
+
+
+def _read_tail(path: Path, limit: int = 3000) -> str:
+    if not path.exists():
+        return "(file not present)"
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if len(text) <= limit:
+        return text or "(empty)"
+    return text[-limit:]
+
+
+def _write_bootstrap_feedback(workspace: Path, attempt: int, error: str) -> str:
+    solver_pkg = workspace / "solver_pkg"
+    solver_files = []
+    if solver_pkg.exists():
+        solver_files = [
+            str(path.relative_to(workspace))
+            for path in sorted(solver_pkg.rglob("*"))
+            if path.is_file()
+        ]
+    solver_file_lines = [f"- `{item}`" for item in solver_files] if solver_files else ["- (none)"]
+    feedback = [
+        "# Bootstrap Feedback",
+        "",
+        f"- Failed attempt: `{attempt}`",
+        f"- Runner diagnosis: `{error}`",
+        "",
+        "## Required File Status",
+        *_bootstrap_file_status(workspace),
+        "",
+        "## Existing solver_pkg Files",
+        *solver_file_lines,
+        "",
+        "## Smoke Test stderr Tail",
+        "```text",
+        _read_tail(workspace / "_bootstrap_smoke_stderr.log"),
+        "```",
+        "",
+        "## Smoke Test stdout Tail",
+        "```text",
+        _read_tail(workspace / "_bootstrap_smoke_stdout.log"),
+        "```",
+        "",
+        "## Required Next Action",
+        "- Create or repair `solver_pkg/cli.py` first. It must implement the exact CLI contract.",
+        "- Create or repair `solver_pkg/pipeline.py` next.",
+        "- Run the bounded smoke test and ensure it produces at least one `*_pred.cif`.",
+        "- Only then write non-empty `solver_pkg/.pipeline_ready`.",
+    ]
+    text = "\n".join(feedback) + "\n"
+    (workspace / "bootstrap_feedback.md").write_text(text, encoding="utf-8")
+    return text
 
 
 def _smoke_test_cli(workspace: Path, sequence: str) -> bool:
@@ -253,13 +335,17 @@ def bootstrap_phase(cfg: RuntimeConfig, workspace: Path, problems_dir: Path, sam
 
     attempt_errors: list[str] = []
     last_error = None
+    retry_feedback = ""
     for attempt in range(1, cfg.bootstrap_max_attempts + 1):
         _progress(f"bootstrap-agent attempt {attempt}/{cfg.bootstrap_max_attempts}")
         try:
             agent = build_bootstrap_agent(cfg, workspace, ROOT / "runs")
+            prompt = GOAL_BOOTSTRAP.format(solver_rounds=cfg.solver_rounds)
+            if retry_feedback:
+                prompt += GOAL_BOOTSTRAP_RETRY + "\n\n" + retry_feedback
             result = _run_with_heartbeat(
                 f"bootstrap-agent attempt {attempt}",
-                lambda: agent.run_sync(GOAL_BOOTSTRAP.format(solver_rounds=cfg.solver_rounds)),
+                lambda: agent.run_sync(prompt),
             )
             (workspace / f"bootstrap_attempt_{attempt:02d}.md").write_text(
                 result.final_answer or "", encoding="utf-8"
@@ -271,6 +357,7 @@ def bootstrap_phase(cfg: RuntimeConfig, workspace: Path, problems_dir: Path, sam
         except Exception as exc:
             last_error = str(exc)
             _progress(f"bootstrap-agent attempt {attempt} failed: {last_error[:300]}")
+        retry_feedback = _write_bootstrap_feedback(workspace, attempt, last_error or "unknown bootstrap failure")
         attempt_errors.append(f"attempt_{attempt}: {last_error}")
 
     # Honest failure: no CIF fabrication. Caller will see emergency_invoked=False
