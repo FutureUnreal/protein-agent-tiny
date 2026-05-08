@@ -169,9 +169,11 @@ def _write_iteration_context(
     it the agent cannot diagnose bottlenecks, only see the aggregate best.
     """
     if current_proxy is not None:
+        blocking_violations = list(current_proxy.hard_gate_violations)
         diagnostics = {
             "current_score_proxy": current_proxy.score,
-            "current_hard_gate_violations": list(current_proxy.hard_gate_violations),
+            "current_blocking_violations": blocking_violations,
+            "current_hard_gate_violations": blocking_violations,
             "current_format_violations": list(getattr(current_proxy, "format_violations", ())),
             "current_geometry_violations": list(getattr(current_proxy, "geometry_violations", ())),
             "current_per_problem": current_proxy.per_problem,
@@ -180,6 +182,7 @@ def _write_iteration_context(
     else:
         diagnostics = {
             "current_score_proxy": None,
+            "current_blocking_violations": [],
             "current_hard_gate_violations": [],
             "current_format_violations": [],
             "current_geometry_violations": [],
@@ -307,7 +310,7 @@ def _proxy_for_workspace(workspace: Path, problems_dir: Path) -> tuple:
     proxy = score_submission(submission, expected)
     _progress(
         f"proxy score={proxy.score:.4f} mode={proxy.mode} "
-        f"hard={len(proxy.hard_gate_violations)} "
+        f"blocking={len(proxy.hard_gate_violations)} "
         f"format={len(getattr(proxy, 'format_violations', ()))} "
         f"geometry={len(getattr(proxy, 'geometry_violations', ()))}"
     )

@@ -91,9 +91,21 @@ def _clash_score(min_nonadj: float) -> float:
 
 def _soft_clash_penalty(clash_vals: list[float]) -> float:
     finite = [v for v in clash_vals if math.isfinite(v)]
-    if finite and any(2.0 <= v < 3.0 for v in finite):
-        return 0.3
-    return 1.0
+    if not finite:
+        return 1.0
+    soft_count = sum(1 for v in finite if 2.0 <= v < 3.0)
+    if soft_count == 0:
+        return 1.0
+    ratio = soft_count / len(finite)
+    return max(0.3, 1.0 - 0.7 * ratio)
+
+
+def _conformer_uniqueness(parsed_list: list[ParsedCif]) -> tuple[float, float]:
+    hashes = [np.round(p.ca_coords, 1).tobytes() for p in parsed_list if p.ca_coords.size]
+    if len(hashes) <= 1:
+        return 1.0, 1.0
+    unique_fraction = len(set(hashes)) / len(hashes)
+    return unique_fraction, max(0.3, unique_fraction)
 
 
 def _is_format_violation(text: str) -> bool:
@@ -134,8 +146,6 @@ def hard_gate(parsed_by_problem: dict, expected_lengths: dict) -> tuple:
             violations.append(f"{pid}:no_conformers")
             continue
         expected_len = expected_lengths.get(pid, 0)
-        seen_hashes: set = set()
-        all_duplicate = True
         for parsed in parsed_list:
             if parsed.errors:
                 for err in parsed.errors:
@@ -153,11 +163,6 @@ def hard_gate(parsed_by_problem: dict, expected_lengths: dict) -> tuple:
                 violations.append(
                     f"{pid}:conf{parsed.conf_idx}:severe_clash_{min_nonadj:.2f}"
                 )
-            hash_bytes = np.round(parsed.ca_coords, 1).tobytes()
-            seen_hashes.add(hash_bytes)
-        all_duplicate = len(seen_hashes) == 1
-        if len(parsed_list) > 1 and all_duplicate:
-            violations.append(f"{pid}:all_conformers_duplicate")
     return tuple(violations)
 
 
@@ -251,6 +256,12 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
             pca_sc = 0.0
             precision_sc = 0.5  # single-conformer: neutral
 
+        unique_fraction, duplicate_penalty = _conformer_uniqueness(parsed_list)
+        if n_conf > 1 and unique_fraction < 1.0:
+            soft_geometry_violations.append(
+                f"{pid}:duplicate_conformers:{unique_fraction:.3f}_unique_fraction"
+            )
+
         problem_score = (
             W_DIVERSITY * diversity_sc
             + W_RG * rg_sc
@@ -262,6 +273,7 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
             + W_FINITE * finite_frac
         )
         problem_score *= _soft_clash_penalty(clash_vals)
+        problem_score *= duplicate_penalty
         per_problem[pid] = {
             "score": round(problem_score, 6),
             "diversity": round(diversity, 4),
@@ -272,6 +284,8 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
             "precision_proxy": round(precision_sc, 4),
             "finite_frac": round(finite_frac, 4),
             "soft_clash_penalty": round(_soft_clash_penalty(clash_vals), 4),
+            "duplicate_penalty": round(duplicate_penalty, 4),
+            "unique_conformer_fraction": round(unique_fraction, 4),
             "n_conformers": n_conf,
             "residue_count": parsed_list[0].residue_count if parsed_list else 0,
         }
@@ -279,14 +293,15 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
 
     format_violations, hard_geometry_violations = _split_violations(list(violations))
     geometry_violations = hard_geometry_violations + tuple(soft_geometry_violations)
-    final_score = 0.0 if violations else (
+    blocking_violations = format_violations + hard_geometry_violations
+    final_score = 0.0 if blocking_violations else (
         float(np.mean(problem_scores)) if problem_scores else 0.0
     )
 
     return ProxyReport(
         score=round(final_score, 6),
         per_problem=per_problem,
-        hard_gate_violations=violations,
+        hard_gate_violations=blocking_violations,
         mode=mode,
         format_violations=format_violations,
         geometry_violations=geometry_violations,

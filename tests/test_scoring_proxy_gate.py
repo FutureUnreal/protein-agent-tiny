@@ -34,9 +34,10 @@ def test_duplicate_conformers(tmp_path):
     for i in range(1, 4):
         write_ca_cif(sub / f"1_conf{i}_pred.cif", "1", i, SEQ5, ca)
     report = score_submission(sub, {"1": len(SEQ5)})
-    assert any("all_conformers_duplicate" in v for v in report.hard_gate_violations)
-    assert any("all_conformers_duplicate" in v for v in report.geometry_violations)
-    assert report.score == 0.0
+    assert not report.hard_gate_violations
+    assert any("duplicate_conformers" in v for v in report.geometry_violations)
+    assert report.per_problem["1"]["duplicate_penalty"] == 0.3333
+    assert report.score > 0.0
 
 
 def test_nonfinite_coords(tmp_path):
@@ -72,6 +73,20 @@ def test_soft_clash_penalty(tmp_path):
     assert not report.hard_gate_violations
     assert any("soft_clash" in v for v in report.geometry_violations)
     assert report.per_problem["1"]["soft_clash_penalty"] == 0.3
+    assert report.score > 0
+
+
+def test_soft_clash_penalty_scales_by_fraction(tmp_path):
+    sub = tmp_path / "mixed_soft_clash"
+    sub.mkdir()
+    ok_ca = make_uniform_ca(len(SEQ8), spacing=3.8, phase=0.2)
+    soft_ca = make_uniform_ca(len(SEQ8), spacing=3.8, phase=0.6)
+    soft_ca[7] = soft_ca[1] + np.array([0.0, 2.5, 0.0])
+    write_ca_cif(sub / "1_conf1_pred.cif", "1", 1, SEQ8, ok_ca)
+    write_ca_cif(sub / "1_conf2_pred.cif", "1", 2, SEQ8, soft_ca)
+    report = score_submission(sub, {"1": len(SEQ8)})
+    assert not report.hard_gate_violations
+    assert report.per_problem["1"]["soft_clash_penalty"] == 0.65
     assert report.score > 0
 
 
