@@ -2,6 +2,7 @@ from __future__ import annotations
 import concurrent.futures
 import difflib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -129,9 +130,24 @@ def _smoke_test_cli(workspace: Path, sequence: str) -> bool:
         "--out-dir", str(smoke_dir),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=180, cwd=str(workspace))
+        env = os.environ.copy()
+        env["PYTHONPATH"] = (
+            str(workspace)
+            + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        )
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=180,
+            cwd=str(workspace),
+            env=env,
+            text=True,
+        )
+        (workspace / "_bootstrap_smoke_stdout.log").write_text(result.stdout or "", encoding="utf-8")
+        (workspace / "_bootstrap_smoke_stderr.log").write_text(result.stderr or "", encoding="utf-8")
         ok = result.returncode == 0 and any(smoke_dir.glob("*_pred.cif"))
-        _progress(f"bootstrap smoke test {'passed' if ok else 'failed'}")
+        detail = "" if ok else f" rc={result.returncode}; see _bootstrap_smoke_stderr.log"
+        _progress(f"bootstrap smoke test {'passed' if ok else 'failed'}{detail}")
         return ok
     except Exception as exc:
         _progress(f"bootstrap smoke test failed: {exc}")
