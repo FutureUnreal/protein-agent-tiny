@@ -59,6 +59,32 @@ def _workspace_python(workspace: Path) -> Path:
     return workspace / ".venv" / "bin" / "python"
 
 
+def _candidate_system_pythons() -> list[str]:
+    candidates: list[str] = []
+    for name in ("python3", "python"):
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
+    for path in (
+        "/usr/bin/python3",
+        "/usr/bin/python",
+        "/usr/local/bin/python3",
+        "/usr/local/bin/python",
+    ):
+        if Path(path).exists():
+            candidates.append(path)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for candidate in candidates:
+        resolved = str(Path(candidate).resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append(candidate)
+    return unique
+
+
 def _find_uv() -> str | None:
     found = shutil.which("uv")
     if found:
@@ -118,7 +144,9 @@ def _ensure_workspace_env(workspace: Path) -> tuple[str | None, str]:
 
     workspace_python = _workspace_python(workspace)
     if workspace_python.exists():
-        return str(workspace_python), "Reusing existing workspace .venv."
+        probe = _probe_imports(str(workspace_python), ("torch", "numpy"))
+        if probe.get("torch") and probe.get("numpy"):
+            return str(workspace_python), "Reusing existing workspace .venv."
 
     uv = _find_uv() or _install_uv()
     if not uv:
@@ -134,6 +162,9 @@ def _ensure_workspace_env(workspace: Path) -> tuple[str | None, str]:
     if proc.returncode != 0:
         return None, f"uv sync failed: {proc.stderr.strip()[:1000]}"
     if workspace_python.exists():
+        probe = _probe_imports(str(workspace_python), ("torch", "numpy"))
+        if not (probe.get("torch") and probe.get("numpy")):
+            return None, f"uv sync completed but torch/numpy are still unavailable: {probe}"
         return str(workspace_python), "Created workspace .venv with uv sync."
     return None, "uv sync completed but workspace Python was not found."
 
@@ -154,10 +185,7 @@ def resolve_solver_python(
         )
 
     runtime_py = Path(sys.executable).resolve()
-    for candidate_name in ("python3", "python"):
-        candidate = shutil.which(candidate_name)
-        if not candidate:
-            continue
+    for candidate in _candidate_system_pythons():
         if Path(candidate).resolve() == runtime_py:
             continue
         probe = _probe_imports(candidate, packages + ("numpy",))
