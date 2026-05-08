@@ -111,6 +111,19 @@ def _write_workspace_solver_shim(workspace: Path) -> None:
     )
 
 
+def _accept_bootstrap_pipeline(workspace: Path, sample_sequence: str) -> bool:
+    sentinel = workspace / "solver_pkg" / ".pipeline_ready"
+    cli = workspace / "solver_pkg" / "cli.py"
+    if not cli.exists():
+        _progress("bootstrap validation skipped: solver_pkg/cli.py missing")
+        return False
+    if not _smoke_test_cli(workspace, sample_sequence):
+        return False
+    sentinel.write_text("ready\n", encoding="utf-8")
+    _write_workspace_solver_shim(workspace)
+    return True
+
+
 def _smoke_test_cli(workspace: Path, sequence: str) -> bool:
     _progress("bootstrap smoke test started")
     cli = workspace / "solver_pkg" / "cli.py"
@@ -229,8 +242,7 @@ def bootstrap_phase(cfg: RuntimeConfig, workspace: Path, problems_dir: Path, sam
     if sentinel.exists():
         _progress("existing solver_pkg sentinel found; validating current pipeline")
         # Fast path: re-validate the existing pipeline before declaring success.
-        if _smoke_test_cli(workspace, sample_sequence):
-            _write_workspace_solver_shim(workspace)
+        if _accept_bootstrap_pipeline(workspace, sample_sequence):
             _progress("existing solver_pkg accepted")
             return BootstrapResult(success=True, attempts=0, sentinel_written=True, emergency_invoked=False, error=None)
         # Sentinel exists but smoke fails -> treat as broken; remove sentinel and re-bootstrap.
@@ -252,11 +264,10 @@ def bootstrap_phase(cfg: RuntimeConfig, workspace: Path, problems_dir: Path, sam
             (workspace / f"bootstrap_attempt_{attempt:02d}.md").write_text(
                 result.final_answer or "", encoding="utf-8"
             )
-            if sentinel.exists() and _smoke_test_cli(workspace, sample_sequence):
-                _write_workspace_solver_shim(workspace)
+            if _accept_bootstrap_pipeline(workspace, sample_sequence):
                 _progress(f"bootstrap-agent attempt {attempt} accepted")
                 return BootstrapResult(success=True, attempts=attempt, sentinel_written=True, emergency_invoked=False, error=None)
-            last_error = "sentinel or smoke test failed"
+            last_error = "solver_pkg/cli.py missing or bootstrap smoke test failed"
         except Exception as exc:
             last_error = str(exc)
             _progress(f"bootstrap-agent attempt {attempt} failed: {last_error[:300]}")
