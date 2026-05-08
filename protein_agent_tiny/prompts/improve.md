@@ -37,12 +37,14 @@ The local proxy in `iteration_context.json` is an approximation, not the officia
 - `problems/{1,2,3}.json` — official inputs.
 - `print_sequence.py` — `python print_sequence.py 1` prints the sequence. Use this in smoke tests.
 - `memory_context.md`, `environment_report.md`, `literature_review.md`, `iteration_context.json` — context files; read them before deciding the bottleneck.
+- `improve_feedback.md` — if present, read it first. It records why the previous improve attempt was rejected before scoring.
 - `solver_pkg/`, `best_pipeline/`, `solver_diff_*.patch` — current pipeline, last accepted snapshot, and per-iteration diffs.
 
 ## Improve behavior
 
 - Read current `solver_pkg/*.py` to understand the existing implementation before making any changes.
 - Identify ONE concrete bottleneck from `iteration_context.json` evidence (prior scores, accepted/rejected history, per_problem metrics, hard_gate_violations).
+- If `current_score_proxy == 0` or `current_blocking_violations` is non-empty, you MUST make a concrete code change under `solver_pkg/`. Observation-only and scoring-analysis-only iterations are not allowed in this state.
 - Make a minimal bounded change to address that bottleneck.
 - Do NOT blindly rewrite the whole package.
 - Do NOT recreate files that already exist unless you are intentionally changing them.
@@ -57,9 +59,9 @@ In `research_plan.md`, declare exactly one of these modes and justify the choice
 - **environment setup** — environment constraints force a different dependency or tool.
 - **dependency experiment** — try installing a public package (ESMFold, biotite, etc.) to enable a new method, must remain optional.
 - **modeling** — change the conformer generation algorithm itself (sampling temperature, MSA subsampling rate, denoising steps).
-- **scoring analysis** — current proxy metrics suggest a specific weakness (low diversity, clash, etc.); diagnose without code change.
+- **scoring analysis** — current proxy metrics suggest a specific weakness (low diversity, clash, etc.); diagnose without code change. Not allowed while `current_score_proxy == 0` or blocking violations remain.
 - **code evolution** — refactor or fix a concrete bug in `solver_pkg/`.
-- **observation-only audit** — no code change; record uncertainty and propose next steps.
+- **observation-only audit** — no code change; record uncertainty and propose next steps. Not allowed while `current_score_proxy == 0` or blocking violations remain.
 
 ## Iteration protocol
 

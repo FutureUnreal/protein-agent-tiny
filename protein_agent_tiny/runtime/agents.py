@@ -77,6 +77,7 @@ def build_improve_agent(cfg: RuntimeConfig, workspace: Path, run_dir: Path):
         ArtifactSpec("hypothesis.md", min_bytes=80, description="Iteration hypothesis."),
         ArtifactSpec("notes.md", min_bytes=20, description="Iteration notes."),
         ArtifactSpec("solver_pkg/cli.py", min_bytes=200, description="CLI shim must remain."),
+        ArtifactSpec("solver_pkg/pipeline.py", min_bytes=200, description="Pipeline core must remain."),
     ))
     return Agent(
         llm=OpenAIAdapter(model=cfg.model, base_url=cfg.base_url, max_retries=2),

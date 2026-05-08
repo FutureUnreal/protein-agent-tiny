@@ -478,6 +478,28 @@ def _restore_solver_pkg_from_best(workspace: Path, best_pipeline: Path) -> None:
     shutil.copytree(best_pipeline, target)
 
 
+def _write_improve_feedback(workspace: Path, iteration: int, current_proxy, reason: str) -> None:
+    feedback = {
+        "iteration": iteration,
+        "reason": reason,
+        "current_score_proxy": getattr(current_proxy, "score", None),
+        "current_blocking_violations": list(getattr(current_proxy, "hard_gate_violations", ()) or ()),
+        "current_format_violations": list(getattr(current_proxy, "format_violations", ()) or ()),
+        "current_geometry_violations": list(getattr(current_proxy, "geometry_violations", ()) or ()),
+        "required_next_action": (
+            "Read iteration_context.json and modify solver_pkg/cli.py or solver_pkg/pipeline.py. "
+            "No observation-only or scoring-analysis-only iteration is allowed while score is 0 "
+            "or blocking violations remain."
+        ),
+    }
+    (workspace / "improve_feedback.md").write_text(
+        "# Improve Feedback\n\n```json\n"
+        + json.dumps(feedback, indent=2)
+        + "\n```\n",
+        encoding="utf-8",
+    )
+
+
 def improve_phase(
     cfg: RuntimeConfig, workspace: Path, problems_dir: Path
 ) -> list:
@@ -539,6 +561,17 @@ def improve_phase(
             hypothesis = (workspace / "hypothesis.md").read_text(encoding="utf-8") if (workspace / "hypothesis.md").exists() else ""
             if not research_plan.strip() or not hypothesis.strip():
                 raise RuntimeError("agent did not write research_plan.md / hypothesis.md")
+            if (
+                not solver_changed
+                and current_proxy is not None
+                and (
+                    getattr(current_proxy, "score", 0.0) == 0.0
+                    or bool(getattr(current_proxy, "hard_gate_violations", ()) or ())
+                )
+            ):
+                reason = "agent did not modify solver_pkg while score is 0 or blocking violations remain"
+                _write_improve_feedback(workspace, iteration, current_proxy, reason)
+                raise RuntimeError(reason)
 
             proxy, _, score_dir = _proxy_for_workspace(workspace, problems_dir)
             score = proxy.score
