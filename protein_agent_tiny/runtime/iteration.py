@@ -33,19 +33,18 @@ GOAL_BOOTSTRAP = """Iteration 0 (bootstrap) for the AI4S protein ensemble compet
 
 This workspace has no existing solver_pkg/. You are creating the FIRST VERSION.
 
-Required deliverables (all four MUST exist before this iteration is considered complete):
-- research_plan.md (≥200 bytes): mode, facts considered, candidate architectures, chosen action, validation plan
-- hypothesis.md (≥80 bytes, ≤12 bullet lines)
+Required deliverables:
+- research_plan.md (>=200 bytes): mode, facts considered, candidate architectures, chosen action, validation plan
+- hypothesis.md (>=80 bytes, <=12 bullet lines)
 - notes.md
-- solver_pkg/cli.py (≥200 bytes) — must accept the CLI: --problem-id ID --sequence SEQ --num-conformers N --optimization-rounds R --out-dir DIR
-- solver_pkg/pipeline.py (≥200 bytes) — implementation
-- solver_pkg/.pipeline_ready — sentinel file written ONLY after cli.py works locally; must contain the literal token `ready` (one byte minimum, e.g. `ready\n`)
+- solver_pkg/cli.py (>=200 bytes): must accept the CLI: --problem-id ID --sequence SEQ --num-conformers N --optimization-rounds R --out-dir DIR
+- solver_pkg/pipeline.py (>=200 bytes): implementation
 
 After writing the package, run a smoke test:
   python print_sequence.py 1 > /tmp/seq.txt   (or read inline)
   python solver_pkg/cli.py --problem-id 1 --sequence <SEQ> --num-conformers 2 --optimization-rounds {solver_rounds} --out-dir smoke
 
-When the smoke test produces valid CIF files, write `ready\n` (or any non-empty content) to `solver_pkg/.pipeline_ready`. The sentinel must NOT be empty — the artifact contract requires at least one byte.
+When the smoke test produces valid CIF files, finish. The runner will independently validate `solver_pkg/cli.py` and write `solver_pkg/.pipeline_ready`.
 """
 
 GOAL_BOOTSTRAP_RETRY = """
@@ -140,7 +139,6 @@ def _bootstrap_file_status(workspace: Path) -> list[str]:
         ("notes.md", 20),
         ("solver_pkg/cli.py", 200),
         ("solver_pkg/pipeline.py", 200),
-        ("solver_pkg/.pipeline_ready", 1),
     )
     lines = []
     for rel, min_bytes in specs:
@@ -199,7 +197,7 @@ def _write_bootstrap_feedback(workspace: Path, attempt: int, error: str) -> str:
         "- Create or repair `solver_pkg/cli.py` first. It must implement the exact CLI contract.",
         "- Create or repair `solver_pkg/pipeline.py` next.",
         "- Run the bounded smoke test and ensure it produces at least one `*_pred.cif`.",
-        "- Only then write non-empty `solver_pkg/.pipeline_ready`.",
+        "- The runner writes `solver_pkg/.pipeline_ready` after its own validation passes.",
     ]
     text = "\n".join(feedback) + "\n"
     (workspace / "bootstrap_feedback.md").write_text(text, encoding="utf-8")

@@ -27,7 +27,7 @@ Your local proxy (computed from CIF coordinates by `scoring.proxy`) approximates
 
 - Edit only files in the current workspace.
 - MUST create `solver_pkg/cli.py` (CLI shim) and `solver_pkg/pipeline.py` (core logic).
-- Write sentinel `solver_pkg/.pipeline_ready` ONLY after `cli.py` can run successfully.
+- The runner writes `solver_pkg/.pipeline_ready` after it independently validates `solver_pkg/cli.py`; do not treat the sentinel as an agent-authored deliverable.
 - **Two environments, one rule for each:**
   - The **agent runtime** (this process) always runs in the project's uv-managed `.venv`. You do not change this.
   - The **solver subprocess** (`solver_pkg/cli.py` when invoked by `run_suite`) runs in the interpreter named under `## Solver Subprocess Environment` in `environment_report.md`. Prefer using packages already available there.
@@ -59,11 +59,10 @@ The workspace already contains these files you should read/use:
 
 ## Deliverables required
 
-You must produce ALL of the following before writing the sentinel:
+You must produce ALL of the following:
 
 - `solver_pkg/cli.py` — CLI shim (min 200 bytes)
 - `solver_pkg/pipeline.py` — core conformer generation logic
-- `solver_pkg/.pipeline_ready` — sentinel written ONLY after a successful smoke test of `cli.py`. The file MUST be non-empty (write `ready` or `ok\n` — anything ≥1 byte; an empty file fails the artifact contract).
 - `research_plan.md` — selected mode, facts from memory/environment/literature, chosen action, bounded validation plan
 - `hypothesis.md` — at most 12 concise bullet lines with at least one literature or environment fact
 - `notes.md` — reasoning and evidence from this bootstrap run
@@ -87,6 +86,5 @@ You must produce ALL of the following before writing the sentinel:
    ])
    ```
    Bash equivalent (POSIX-only): `SEQ=$(python print_sequence.py 1); python solver.py --problem-id 1 --sequence "$SEQ" --num-conformers 2 --optimization-rounds 1 --out-dir smoke`
-7. Only if the smoke test passes AND produces valid CIF files, write `solver_pkg/.pipeline_ready` with non-empty content (e.g. `ready\n`).
-8. Append concise evidence to `notes.md`.
+7. Append concise evidence to `notes.md`. The runner will repeat the smoke test and write `solver_pkg/.pipeline_ready` if validation passes.
 

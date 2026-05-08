@@ -42,7 +42,7 @@ def _budget(max_tool_calls: int, max_llm_calls: int = 20):
 
 
 def build_bootstrap_agent(cfg: RuntimeConfig, workspace: Path, run_dir: Path):
-    """First-version creator. Requires cli.py + pipeline.py + sentinel."""
+    """First-version creator. Requires cli.py + pipeline.py; runner writes sentinel after validation."""
     from all_in_agents import Agent, ArtifactContract, ArtifactSpec, OpenAIAdapter
 
     registry, policy = _make_registry_and_policy(workspace)
@@ -52,7 +52,6 @@ def build_bootstrap_agent(cfg: RuntimeConfig, workspace: Path, run_dir: Path):
         ArtifactSpec("notes.md", min_bytes=20, description="Bootstrap notes."),
         ArtifactSpec("solver_pkg/cli.py", min_bytes=200, description="CLI shim."),
         ArtifactSpec("solver_pkg/pipeline.py", min_bytes=200, description="Pipeline core."),
-        ArtifactSpec("solver_pkg/.pipeline_ready", min_bytes=1, description="Sentinel."),
     ))
     return Agent(
         llm=OpenAIAdapter(model=cfg.model, base_url=cfg.base_url, max_retries=2),

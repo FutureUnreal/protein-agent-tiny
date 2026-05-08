@@ -23,7 +23,8 @@ The agent runs as a state machine with three roles:
 1. **bootstrap-agent** — runs ONCE per workspace when `solver_pkg/.pipeline_ready` is absent.
    System prompt declares "you are creating the FIRST VERSION of a protein conformational
    ensemble pipeline FOR THIS WORKSPACE". It must produce `solver_pkg/cli.py`,
-   `solver_pkg/pipeline.py`, and write the sentinel before passing control. After
+   `solver_pkg/pipeline.py`, `research_plan.md`, `hypothesis.md`, and `notes.md`.
+   The runtime validates the CLI with a smoke test and writes the sentinel. After
    `PROTEIN_AGENT_BOOTSTRAP_MAX_ATTEMPTS` (default 2) consecutive failures, the runtime
    **records the failure honestly** in `agent.log` (`mode=bootstrap_failed`) and produces
    a submission with **zero CIFs**. No placeholder geometry is fabricated.
