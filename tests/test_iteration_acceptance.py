@@ -27,6 +27,14 @@ def test_zero_score_accepts_ordered_geometry_improvement():
     assert reason == "zero_score_geometry_violations_reduced"
 
 
+def test_zero_score_accepts_format_fix_even_when_geometry_becomes_visible():
+    best = _proxy(0.0, fmt=33, geom=0, mean=0.0, hard=tuple(f"fmt{i}" for i in range(33)))
+    candidate = _proxy(0.0, fmt=0, geom=11, mean=0.0, hard=tuple(f"geom{i}" for i in range(11)))
+    accepted, reason = _accept_proxy(candidate, best, 0.0)
+    assert accepted
+    assert reason == "zero_score_format_violations_reduced"
+
+
 def test_zero_score_rejects_improvement_with_lower_mean():
     best = _proxy(0.0, fmt=0, geom=4, mean=0.2, hard=("geom",))
     candidate = _proxy(0.0, fmt=0, geom=3, mean=0.1, hard=("geom",))

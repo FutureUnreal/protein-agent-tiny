@@ -334,6 +334,10 @@ def _proxy_counts(proxy) -> tuple[int, int, float]:
     )
 
 
+def _blocking_count(proxy) -> int:
+    return len(getattr(proxy, "hard_gate_violations", ()) or ())
+
+
 def _accept_proxy(candidate, best_proxy, best_score: float) -> tuple[bool, str]:
     if not candidate.hard_gate_violations and candidate.score >= best_score:
         return True, "score_nonregression_without_hard_gates"
@@ -346,14 +350,22 @@ def _accept_proxy(candidate, best_proxy, best_score: float) -> tuple[bool, str]:
 
     cand_fmt, cand_geom, cand_mean = _proxy_counts(candidate)
     best_fmt, best_geom, best_mean = _proxy_counts(best_proxy)
+    cand_blocking = _blocking_count(candidate)
+    best_blocking = _blocking_count(best_proxy)
     eps = 1e-9
-    if cand_fmt < best_fmt and cand_geom <= best_geom and cand_mean + eps >= best_mean:
+    if cand_fmt < best_fmt and cand_blocking < best_blocking:
         return True, "zero_score_format_violations_reduced"
-    if cand_fmt == best_fmt and cand_geom < best_geom and cand_mean + eps >= best_mean:
+    if (
+        cand_fmt == best_fmt
+        and cand_geom < best_geom
+        and cand_blocking <= best_blocking
+        and cand_mean + eps >= best_mean
+    ):
         return True, "zero_score_geometry_violations_reduced"
     if (
         cand_fmt == best_fmt
         and cand_geom == best_geom
+        and cand_blocking <= best_blocking
         and cand_mean > best_mean + eps
     ):
         return True, "zero_score_mean_problem_score_improved"
