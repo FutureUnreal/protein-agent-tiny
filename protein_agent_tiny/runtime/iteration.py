@@ -172,6 +172,8 @@ def _write_iteration_context(
         diagnostics = {
             "current_score_proxy": current_proxy.score,
             "current_hard_gate_violations": list(current_proxy.hard_gate_violations),
+            "current_format_violations": list(getattr(current_proxy, "format_violations", ())),
+            "current_geometry_violations": list(getattr(current_proxy, "geometry_violations", ())),
             "current_per_problem": current_proxy.per_problem,
             "current_mode": current_proxy.mode,
         }
@@ -179,6 +181,8 @@ def _write_iteration_context(
         diagnostics = {
             "current_score_proxy": None,
             "current_hard_gate_violations": [],
+            "current_format_violations": [],
+            "current_geometry_violations": [],
             "current_per_problem": {},
             "current_mode": None,
         }
@@ -303,9 +307,54 @@ def _proxy_for_workspace(workspace: Path, problems_dir: Path) -> tuple:
     proxy = score_submission(submission, expected)
     _progress(
         f"proxy score={proxy.score:.4f} mode={proxy.mode} "
-        f"violations={len(proxy.hard_gate_violations)}"
+        f"hard={len(proxy.hard_gate_violations)} "
+        f"format={len(getattr(proxy, 'format_violations', ()))} "
+        f"geometry={len(getattr(proxy, 'geometry_violations', ()))}"
     )
     return proxy, raw, iteration_root
+
+
+def _mean_problem_score(proxy) -> float:
+    scores = [
+        float(item.get("score", 0.0))
+        for item in (getattr(proxy, "per_problem", {}) or {}).values()
+        if isinstance(item, dict)
+    ]
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def _proxy_counts(proxy) -> tuple[int, int, float]:
+    return (
+        len(getattr(proxy, "format_violations", ()) or ()),
+        len(getattr(proxy, "geometry_violations", ()) or ()),
+        _mean_problem_score(proxy),
+    )
+
+
+def _accept_proxy(candidate, best_proxy, best_score: float) -> tuple[bool, str]:
+    if not candidate.hard_gate_violations and candidate.score >= best_score:
+        return True, "score_nonregression_without_hard_gates"
+
+    # In the zero-score region, hard gates hide useful progress. Accept a
+    # strictly better intermediate only if higher-priority dimensions do not
+    # regress: format violations -> geometry violations -> mean problem score.
+    if best_score != 0.0 or best_proxy is None:
+        return False, "rejected_by_score_or_hard_gates"
+
+    cand_fmt, cand_geom, cand_mean = _proxy_counts(candidate)
+    best_fmt, best_geom, best_mean = _proxy_counts(best_proxy)
+    eps = 1e-9
+    if cand_fmt < best_fmt and cand_geom <= best_geom and cand_mean + eps >= best_mean:
+        return True, "zero_score_format_violations_reduced"
+    if cand_fmt == best_fmt and cand_geom < best_geom and cand_mean + eps >= best_mean:
+        return True, "zero_score_geometry_violations_reduced"
+    if (
+        cand_fmt == best_fmt
+        and cand_geom == best_geom
+        and cand_mean > best_mean + eps
+    ):
+        return True, "zero_score_mean_problem_score_improved"
+    return False, "zero_score_no_ordered_improvement"
 
 
 def _restore_solver_pkg_from_best(workspace: Path, best_pipeline: Path) -> None:
@@ -342,8 +391,15 @@ def improve_phase(
         )
         return history
     best_score = baseline_proxy.score
+    best_proxy = baseline_proxy
     (workspace / "baseline_result.json").write_text(
-        json.dumps({"score": best_score, "violations": list(baseline_proxy.hard_gate_violations), "per_problem": baseline_proxy.per_problem}, indent=2),
+        json.dumps({
+            "score": best_score,
+            "violations": list(baseline_proxy.hard_gate_violations),
+            "format_violations": list(getattr(baseline_proxy, "format_violations", ())),
+            "geometry_violations": list(getattr(baseline_proxy, "geometry_violations", ())),
+            "per_problem": baseline_proxy.per_problem,
+        }, indent=2),
         encoding="utf-8",
     )
 
@@ -375,12 +431,13 @@ def improve_phase(
 
             proxy, _, score_dir = _proxy_for_workspace(workspace, problems_dir)
             score = proxy.score
-            accepted = (not proxy.hard_gate_violations) and score >= best_score
+            accepted, accept_reason = _accept_proxy(proxy, best_proxy, best_score)
             current_proxy = proxy
 
             obs_text = _reflect(cfg, workspace, iteration, proxy, accepted, hypothesis)
             if accepted:
                 best_score = score
+                best_proxy = proxy
                 if best_pipeline.exists():
                     shutil.rmtree(best_pipeline, ignore_errors=True)
                 shutil.copytree(workspace / "solver_pkg", best_pipeline)
@@ -388,7 +445,7 @@ def improve_phase(
                 _restore_solver_pkg_from_best(workspace, best_pipeline)
             _progress(
                 f"iteration {iteration}/{cfg.iterations} "
-                f"{'accepted' if accepted else 'rejected'}; score={score:.4f}; "
+                f"{'accepted' if accepted else 'rejected'}; reason={accept_reason}; score={score:.4f}; "
                 f"best_score={best_score:.4f}"
             )
 

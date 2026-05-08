@@ -33,6 +33,8 @@ class ProxyReport:
     per_problem: dict
     hard_gate_violations: tuple
     mode: str
+    format_violations: tuple = ()
+    geometry_violations: tuple = ()
 
 
 @dataclass(frozen=True)

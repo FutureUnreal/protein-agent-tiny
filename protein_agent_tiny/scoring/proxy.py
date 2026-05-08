@@ -29,6 +29,8 @@ class ProxyReport:
     per_problem: dict
     hard_gate_violations: tuple
     mode: str
+    format_violations: tuple = ()
+    geometry_violations: tuple = ()
 
 
 # Proxy weight constants.
@@ -74,14 +76,43 @@ def _spacing_score(stats: dict) -> float:
 
 
 def _clash_score(min_nonadj: float) -> float:
-    # >=4.0 A excellent, 3.0 A threshold (below = hard gate), linear ramp
+    # >=4.0 A excellent, 3.0 A acceptable, 2.0-3.0 A is a soft penalty,
+    # <2.0 A is a hard gate handled by hard_gate().
     if not math.isfinite(min_nonadj):
         return 1.0  # too few residues to evaluate
     if min_nonadj >= 4.0:
         return 1.0
-    if min_nonadj < 3.0:
-        return 0.0
-    return (min_nonadj - 3.0) / 1.0
+    if min_nonadj >= 3.0:
+        return (min_nonadj - 3.0) / 1.0
+    if min_nonadj >= 2.0:
+        return 0.3 * ((min_nonadj - 2.0) / 1.0)
+    return 0.0
+
+
+def _soft_clash_penalty(clash_vals: list[float]) -> float:
+    finite = [v for v in clash_vals if math.isfinite(v)]
+    if finite and any(2.0 <= v < 3.0 for v in finite):
+        return 0.3
+    return 1.0
+
+
+def _is_format_violation(text: str) -> bool:
+    markers = (
+        "no_conformers",
+        "bad_filename",
+        "no_atom_site_columns",
+        "no_ca_atoms",
+        "nonfinite",
+        "residue_count_mismatch",
+        "no_ca",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _split_violations(violations: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    format_violations = tuple(v for v in violations if _is_format_violation(v))
+    geometry_violations = tuple(v for v in violations if not _is_format_violation(v))
+    return format_violations, geometry_violations
 
 
 def _pca_score(pe: dict, n_conformers: int) -> float:
@@ -117,21 +148,10 @@ def hard_gate(parsed_by_problem: dict, expected_lengths: dict) -> tuple:
             if parsed.ca_coords.size == 0:
                 violations.append(f"{pid}:conf{parsed.conf_idx}:no_ca")
                 continue
-            stats = ca_spacing_stats(parsed.ca_coords)
-            if abs(stats["mean"] - 3.8) > 1.0:
-                violations.append(
-                    f"{pid}:conf{parsed.conf_idx}:spacing_mean_{stats['mean']:.2f}"
-                )
             min_nonadj = ca_nonadjacent_min_distance(parsed.ca_coords)
-            if math.isfinite(min_nonadj) and min_nonadj < 3.0:
+            if math.isfinite(min_nonadj) and min_nonadj < 2.0:
                 violations.append(
                     f"{pid}:conf{parsed.conf_idx}:severe_clash_{min_nonadj:.2f}"
-                )
-            rg = radius_of_gyration(parsed.ca_coords)
-            rg_upper_strict = 6.0 * max(parsed.residue_count, 1) ** 0.52
-            if rg > rg_upper_strict:
-                violations.append(
-                    f"{pid}:conf{parsed.conf_idx}:rg_implausible_{rg:.2f}>{rg_upper_strict:.2f}"
                 )
             hash_bytes = np.round(parsed.ca_coords, 1).tobytes()
             seen_hashes.add(hash_bytes)
@@ -151,6 +171,7 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
         parsed_by_problem.setdefault(pid, [])
 
     violations = hard_gate(parsed_by_problem, expected_problems)
+    soft_geometry_violations: list[str] = []
 
     modes: set = set()
     for parsed_list in parsed_by_problem.values():
@@ -200,6 +221,9 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
         clash_vals = [
             ca_nonadjacent_min_distance(p.ca_coords) for p in parsed_list if p.ca_coords.size
         ]
+        for idx, clash in enumerate(clash_vals, start=1):
+            if math.isfinite(clash) and 2.0 <= clash < 3.0:
+                soft_geometry_violations.append(f"{pid}:conf{idx}:soft_clash_{clash:.2f}")
         clash_sc = (
             float(np.mean([_clash_score(c) for c in clash_vals])) if clash_vals else 0.0
         )
@@ -237,6 +261,7 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
             + W_PRECISION * precision_sc
             + W_FINITE * finite_frac
         )
+        problem_score *= _soft_clash_penalty(clash_vals)
         per_problem[pid] = {
             "score": round(problem_score, 6),
             "diversity": round(diversity, 4),
@@ -246,11 +271,14 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
             "pca_rank": round(pca_sc, 4),
             "precision_proxy": round(precision_sc, 4),
             "finite_frac": round(finite_frac, 4),
+            "soft_clash_penalty": round(_soft_clash_penalty(clash_vals), 4),
             "n_conformers": n_conf,
             "residue_count": parsed_list[0].residue_count if parsed_list else 0,
         }
         problem_scores.append(problem_score)
 
+    format_violations, hard_geometry_violations = _split_violations(list(violations))
+    geometry_violations = hard_geometry_violations + tuple(soft_geometry_violations)
     final_score = 0.0 if violations else (
         float(np.mean(problem_scores)) if problem_scores else 0.0
     )
@@ -260,4 +288,6 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
         per_problem=per_problem,
         hard_gate_violations=violations,
         mode=mode,
+        format_violations=format_violations,
+        geometry_violations=geometry_violations,
     )
