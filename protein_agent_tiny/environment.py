@@ -45,7 +45,7 @@ def module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def probe_environment(root: Path) -> dict[str, object]:
+def probe_environment(root: Path, workspace: Path | None = None) -> dict[str, object]:
     disk = shutil.disk_usage(root)
     commands = {
         "nvidia_smi": ["nvidia-smi"],
@@ -58,7 +58,7 @@ def probe_environment(root: Path) -> dict[str, object]:
     # Probe which Python the solver subprocess will actually use.
     try:
         from .runtime.solver_env import resolve_solver_python
-        probe = resolve_solver_python()
+        probe = resolve_solver_python(workspace)
         solver_env = {
             "python": probe.python,
             "source": probe.source,
@@ -131,7 +131,7 @@ def render_environment_report(env: dict[str, object]) -> str:
             "Where `solver_pkg/cli.py` will actually run (separate from the agent runtime's .venv).",
             "",
             f"- Python: `{solver_env.get('python')}`",
-            f"- Source: `{solver_env.get('source')}` (host = system Python with scientific stack; venv = project .venv; override = PROTEIN_AGENT_SOLVER_PYTHON)",
+            f"- Source: `{solver_env.get('source')}` (host = local system Python with torch; workspace = agent-owned uv .venv; override = PROTEIN_AGENT_SOLVER_PYTHON)",
             f"- Notes: {solver_env.get('notes', '')}",
             "",
             "### Available packages in solver environment",
@@ -147,7 +147,7 @@ def render_environment_report(env: dict[str, object]) -> str:
 
 
 def write_environment_report(workspace: Path, root: Path) -> dict[str, object]:
-    env = probe_environment(root)
+    env = probe_environment(root, workspace)
     (workspace / "environment_report.json").write_text(json.dumps(env, indent=2), encoding="utf-8")
     (workspace / "environment_report.md").write_text(render_environment_report(env), encoding="utf-8")
     return env

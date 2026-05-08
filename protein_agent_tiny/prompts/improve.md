@@ -27,7 +27,8 @@ The local proxy in `iteration_context.json` is an approximation, not the officia
   - The **solver subprocess** runs in the interpreter named under `## Solver Subprocess Environment` in `environment_report.md`. Prefer packages already available there.
 - **Dependency policy:**
   - If `solver_env.source = host`, import existing host packages directly in `solver_pkg/pipeline.py`. Do not mirror them into `pyproject.toml`.
-  - Edit `pyproject.toml` only when `solver_env.source = venv` or the host is missing a specific package. Record rationale in `notes.md`.
+  - If `solver_env.source = workspace`, `pyproject.toml` in this workspace is your own solver dependency manifest. You may edit it, then run `uv sync` in the workspace when a public dependency is justified. Do not edit the project root dependency files.
+  - If `environment_report.md` says the solver environment probe failed, record the limitation in `notes.md`; do not fake CIFs or silently use the project runtime.
   - On missing optional dependency at runtime, exit non-zero — do not silently substitute a less scientific method.
 - Record your reasoning and code changes in `notes.md`.
 

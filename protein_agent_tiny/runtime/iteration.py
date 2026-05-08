@@ -1,4 +1,5 @@
 from __future__ import annotations
+import concurrent.futures
 import difflib
 import json
 import shutil
@@ -55,6 +56,26 @@ CLI contract: python solver_pkg/cli.py --problem-id 1 --sequence SEQ --num-confo
 """
 
 
+def _progress(message: str) -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
+def _run_with_heartbeat(label: str, fn, interval_seconds: int = 30):
+    _progress(f"{label} started")
+    started = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(fn)
+        while True:
+            try:
+                result = future.result(timeout=interval_seconds)
+                elapsed = int(time.time() - started)
+                _progress(f"{label} finished in {elapsed}s")
+                return result
+            except concurrent.futures.TimeoutError:
+                elapsed = int(time.time() - started)
+                _progress(f"{label} still running ({elapsed}s elapsed)")
+
+
 def _expected_problems_map(workspace_or_root: Path) -> dict:
     """Returns {problem_id: sequence_length} for problems 1, 2, 3."""
     out = {}
@@ -90,13 +111,15 @@ def _write_workspace_solver_shim(workspace: Path) -> None:
 
 
 def _smoke_test_cli(workspace: Path, sequence: str) -> bool:
+    _progress("bootstrap smoke test started")
     cli = workspace / "solver_pkg" / "cli.py"
     if not cli.exists():
+        _progress("bootstrap smoke test skipped: solver_pkg/cli.py missing")
         return False
     smoke_dir = workspace / "_bootstrap_smoke"
     if smoke_dir.exists():
         shutil.rmtree(smoke_dir, ignore_errors=True)
-    solver_py = resolve_solver_python().python
+    solver_py = resolve_solver_python(workspace).python
     cmd = [
         solver_py, str(cli),
         "--problem-id", "1",
@@ -107,8 +130,11 @@ def _smoke_test_cli(workspace: Path, sequence: str) -> bool:
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=180, cwd=str(workspace))
-        return result.returncode == 0 and any(smoke_dir.glob("*_pred.cif"))
-    except Exception:
+        ok = result.returncode == 0 and any(smoke_dir.glob("*_pred.cif"))
+        _progress(f"bootstrap smoke test {'passed' if ok else 'failed'}")
+        return ok
+    except Exception as exc:
+        _progress(f"bootstrap smoke test failed: {exc}")
         return False
 
 
@@ -178,9 +204,11 @@ def bootstrap_phase(cfg: RuntimeConfig, workspace: Path, problems_dir: Path, sam
     """
     sentinel = workspace / "solver_pkg" / ".pipeline_ready"
     if sentinel.exists():
+        _progress("existing solver_pkg sentinel found; validating current pipeline")
         # Fast path: re-validate the existing pipeline before declaring success.
         if _smoke_test_cli(workspace, sample_sequence):
             _write_workspace_solver_shim(workspace)
+            _progress("existing solver_pkg accepted")
             return BootstrapResult(success=True, attempts=0, sentinel_written=True, emergency_invoked=False, error=None)
         # Sentinel exists but smoke fails -> treat as broken; remove sentinel and re-bootstrap.
         try:
@@ -191,18 +219,24 @@ def bootstrap_phase(cfg: RuntimeConfig, workspace: Path, problems_dir: Path, sam
     attempt_errors: list[str] = []
     last_error = None
     for attempt in range(1, cfg.bootstrap_max_attempts + 1):
+        _progress(f"bootstrap-agent attempt {attempt}/{cfg.bootstrap_max_attempts}")
         try:
             agent = build_bootstrap_agent(cfg, workspace, ROOT / "runs")
-            result = agent.run_sync(GOAL_BOOTSTRAP.format(solver_rounds=cfg.solver_rounds))
+            result = _run_with_heartbeat(
+                f"bootstrap-agent attempt {attempt}",
+                lambda: agent.run_sync(GOAL_BOOTSTRAP.format(solver_rounds=cfg.solver_rounds)),
+            )
             (workspace / f"bootstrap_attempt_{attempt:02d}.md").write_text(
                 result.final_answer or "", encoding="utf-8"
             )
             if sentinel.exists() and _smoke_test_cli(workspace, sample_sequence):
                 _write_workspace_solver_shim(workspace)
+                _progress(f"bootstrap-agent attempt {attempt} accepted")
                 return BootstrapResult(success=True, attempts=attempt, sentinel_written=True, emergency_invoked=False, error=None)
             last_error = "sentinel or smoke test failed"
         except Exception as exc:
             last_error = str(exc)
+            _progress(f"bootstrap-agent attempt {attempt} failed: {last_error[:300]}")
         attempt_errors.append(f"attempt_{attempt}: {last_error}")
 
     # Honest failure: no CIF fabrication. Caller will see emergency_invoked=False
@@ -244,10 +278,17 @@ def _proxy_for_workspace(workspace: Path, problems_dir: Path) -> tuple:
     """Run solver_pkg via run_suite, then score real CIFs. Returns (ProxyReport, raw_run_report, iteration_root)."""
     from ..run_suite import run_suite as run_suite_fn
     iteration_root = workspace / "iteration_runs" / f"score_{int(time.time())}"
-    raw = run_suite_fn(workspace / "solver.py", iteration_root, 1, clean=True)
+    raw = _run_with_heartbeat(
+        f"proxy run_suite {iteration_root.name}",
+        lambda: run_suite_fn(workspace / "solver.py", iteration_root, 1, clean=True),
+    )
     submission = iteration_root / "submission"
     expected = _expected_problems_map(workspace)
     proxy = score_submission(submission, expected)
+    _progress(
+        f"proxy score={proxy.score:.4f} mode={proxy.mode} "
+        f"violations={len(proxy.hard_gate_violations)}"
+    )
     return proxy, raw, iteration_root
 
 
@@ -264,6 +305,7 @@ def _restore_solver_pkg_from_best(workspace: Path, best_pipeline: Path) -> None:
 def improve_phase(
     cfg: RuntimeConfig, workspace: Path, problems_dir: Path
 ) -> list:
+    _progress("improve phase started")
     history = []
     best_pipeline = workspace / "best_pipeline"
     if best_pipeline.exists():
@@ -274,8 +316,10 @@ def improve_phase(
     # short-sequence smoke test but crashes on the longer competition sequences),
     # skip improve iterations and let final packaging emit whatever CIFs survived.
     try:
+        _progress("baseline full-sequence proxy evaluation")
         baseline_proxy, _, _ = _proxy_for_workspace(workspace, problems_dir)
     except Exception as exc:
+        _progress(f"baseline full-sequence proxy evaluation failed: {str(exc)[:300]}")
         (workspace / "baseline_result.json").write_text(
             json.dumps({"score": -1.0, "error": f"baseline_run_failed: {exc}"}, indent=2),
             encoding="utf-8",
@@ -289,6 +333,7 @@ def improve_phase(
 
     current_proxy = baseline_proxy
     for iteration in range(1, cfg.iterations + 1):
+        _progress(f"iteration {iteration}/{cfg.iterations} started; best_score={best_score:.4f}")
         before_files = _read_solver_pkg(workspace)
         _write_iteration_context(
             workspace, iteration, cfg.iterations, best_score, history,
@@ -296,12 +341,16 @@ def improve_phase(
         )
         try:
             agent = build_improve_agent(cfg, workspace, ROOT / "runs")
-            result = agent.run_sync(GOAL_IMPROVE.format(
-                iteration=iteration, total_iterations=cfg.iterations, solver_rounds=cfg.solver_rounds,
-            ))
+            result = _run_with_heartbeat(
+                f"improve-agent iteration {iteration}/{cfg.iterations}",
+                lambda: agent.run_sync(GOAL_IMPROVE.format(
+                    iteration=iteration, total_iterations=cfg.iterations, solver_rounds=cfg.solver_rounds,
+                )),
+            )
             (workspace / f"agent_final_answer_{iteration:02d}.md").write_text(result.final_answer or "", encoding="utf-8")
             after_files = _read_solver_pkg(workspace)
             solver_changed = _solver_diff(workspace, iteration, before_files, after_files)
+            _progress(f"iteration {iteration}: solver_changed={solver_changed}")
 
             research_plan = (workspace / "research_plan.md").read_text(encoding="utf-8") if (workspace / "research_plan.md").exists() else ""
             hypothesis = (workspace / "hypothesis.md").read_text(encoding="utf-8") if (workspace / "hypothesis.md").exists() else ""
@@ -321,6 +370,11 @@ def improve_phase(
                 shutil.copytree(workspace / "solver_pkg", best_pipeline)
             else:
                 _restore_solver_pkg_from_best(workspace, best_pipeline)
+            _progress(
+                f"iteration {iteration}/{cfg.iterations} "
+                f"{'accepted' if accepted else 'rejected'}; score={score:.4f}; "
+                f"best_score={best_score:.4f}"
+            )
 
             history.append(IterationResult(
                 iteration=iteration,
@@ -343,6 +397,7 @@ def improve_phase(
             ))
         except Exception as exc:
             _restore_solver_pkg_from_best(workspace, best_pipeline)
+            _progress(f"iteration {iteration}/{cfg.iterations} failed: {str(exc)[:300]}")
             history.append(IterationResult(
                 iteration=iteration,
                 accepted=False,
@@ -374,7 +429,10 @@ def _reflect(cfg: RuntimeConfig, workspace: Path, iteration: int, proxy, accepte
             f"hypothesis={hypothesis[:1500]}.\n"
             "Sections: Evidence, Supported/Rejected, Risks, Open Questions."
         )
-        result = agent.run_sync(prompt)
+        result = _run_with_heartbeat(
+            f"reflect-agent iteration {iteration}",
+            lambda: agent.run_sync(prompt),
+        )
         text = (result.final_answer or "").strip()
         if text:
             (workspace / f"observation_{iteration:02d}.md").write_text(text, encoding="utf-8")
@@ -415,8 +473,15 @@ def run(cfg: RuntimeConfig) -> int:
     out_root = cfg.output_dir
     out_root.mkdir(parents=True, exist_ok=True)
     submission = out_root / "submission"
+    _progress(
+        "agent runner started: "
+        f"iterations={cfg.iterations}, solver_rounds={cfg.solver_rounds}, "
+        f"max_minutes={cfg.max_minutes}, workspace={workspace}, out={out_root}, "
+        f"model={cfg.model}"
+    )
 
     if cfg.skip_agent:
+        _progress("skip-agent package-only mode started")
         # Package-only audit mode. Produces no CIFs because fabricating placeholders
         # would misrepresent agent capability. Useful for CI / packaging smoke tests;
         # not a valid scientific submission.
@@ -443,23 +508,38 @@ def run(cfg: RuntimeConfig) -> int:
         (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         (out_root / "technical_report.md").write_text(build_report(out_root), encoding="utf-8")
         archive_output(out_root)
+        _progress(f"skip-agent package-only mode finished; output_zip={out_root / 'output.zip'}")
         return 0 if validation["ok"] else 1
 
     # Full agent path
+    _progress("preparing workspace")
     prepare_workspace(workspace, ROOT)
+    _progress("writing memory context")
     write_memory_context(ROOT, workspace)
-    environment = write_environment_report(workspace, ROOT)
-    literature = collect_literature(workspace)
+    environment = _run_with_heartbeat(
+        "environment probe",
+        lambda: write_environment_report(workspace, ROOT),
+    )
+    literature = _run_with_heartbeat(
+        "literature collection",
+        lambda: collect_literature(workspace),
+    )
 
     problems_dir = workspace / "problems"
     sample_sequence = next(iter(problems_mod.load_problems(problems_dir))).sequence
 
+    _progress("bootstrap phase started")
     boot_result = bootstrap_phase(cfg, workspace, problems_dir, sample_sequence)
+    _progress(
+        f"bootstrap phase finished: success={boot_result.success}, "
+        f"attempts={boot_result.attempts}, error={boot_result.error}"
+    )
 
     history: list = []
     final_run_error: str | None = None
     if boot_result.success:
         history = improve_phase(cfg, workspace, problems_dir)
+        _progress(f"improve phase finished: iterations_recorded={len(history)}")
 
     # Final packaging — no fabrication path. Four honest outcomes:
     #   1. skip_agent (handled above): zero CIFs + audit_only agent.log.
@@ -476,9 +556,13 @@ def run(cfg: RuntimeConfig) -> int:
     if boot_result.success:
         try:
             from ..run_suite import run_suite as run_suite_fn
-            run_suite_fn(workspace / "solver.py", out_root, cfg.solver_rounds, clean=True)
+            _run_with_heartbeat(
+                "final run_suite packaging pass",
+                lambda: run_suite_fn(workspace / "solver.py", out_root, cfg.solver_rounds, clean=True),
+            )
         except Exception as exc:
             final_run_error = str(exc)
+            _progress(f"final run_suite packaging pass failed: {final_run_error[:300]}")
             (workspace / "final_run_error.txt").write_text(final_run_error, encoding="utf-8")
             # run_suite copies CIFs into submission/ as it goes; whatever survived
             # is honest output. Do NOT overwrite or fabricate.
@@ -558,5 +642,9 @@ def run(cfg: RuntimeConfig) -> int:
     (out_root / "run_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     (out_root / "technical_report.md").write_text(build_report(out_root), encoding="utf-8")
     archive_output(out_root)
+    _progress(
+        f"agent runner finished: ok={validation['ok']}, cif_count={cif_count}, "
+        f"output_zip={out_root / 'output.zip'}"
+    )
     print(json.dumps(report, indent=2))
     return 0 if validation["ok"] else 1

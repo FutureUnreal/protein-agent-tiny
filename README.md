@@ -146,7 +146,7 @@ scripts/run_agent.sh <agent_iterations> <max_minutes_per_iteration> <solver_cand
 
 Each agent iteration loads the workspace skill `.skills/protein-ensemble/SKILL.md`, reads `memory_context.md`, `environment_report.md`, `literature_review.md`, and `iteration_context.json`, then writes `research_plan.md` before `hypothesis.md`. The plan lets the agent choose its mode for that iteration: literature review, environment setup, dependency experiment, modeling, scoring analysis, code evolution, or observation-only audit.
 
-The workspace also contains a copy of `pyproject.toml`, which is the only dependency manifest. The agent may edit it when public dependencies are justified by `environment_report.md`. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` or omit `research_plan.md`/`hypothesis.md` are rejected.
+If no local system Python with torch is available, the runtime creates an agent-owned `pyproject.toml` under the current workspace and syncs it with uv. The agent may edit that workspace manifest when public dependencies are justified by `environment_report.md`; it must not edit the project root dependency files. Observation-only iterations are allowed when justified; responses that stop at `max_tokens` or omit `research_plan.md`/`hypothesis.md` are rejected.
 
 The latest agent workspace is under `workspaces/`, factual memory is under `memory/`, and the latest packaged submission remains under `outputs/latest/output.zip`.
 Every baseline or agent run also writes a timestamped snapshot under `outputs/archive/` so a later run does not overwrite the last usable package.

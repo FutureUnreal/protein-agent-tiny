@@ -33,7 +33,8 @@ Your local proxy (computed from CIF coordinates by `scoring.proxy`) approximates
   - The **solver subprocess** (`solver_pkg/cli.py` when invoked by `run_suite`) runs in the interpreter named under `## Solver Subprocess Environment` in `environment_report.md`. Prefer using packages already available there.
 - **Dependency policy:**
   - If `solver_env.source = host` and the host already has what you need (e.g. `torch`, `biotite`, `esm`), **import them directly in `solver_pkg/pipeline.py` without editing `pyproject.toml`**. The host environment is pre-configured; do not duplicate heavy ML deps into the project venv.
-  - If `solver_env.source = venv` (no host scientific stack detected), or a specific package is missing from the host, then `pyproject.toml` is the dependency manifest you may edit. Record the rationale in `notes.md`.
+  - If `solver_env.source = workspace`, `pyproject.toml` in this workspace is your own solver dependency manifest. You may edit it, then run `uv sync` in the workspace when a public dependency is justified. Do not edit the project root dependency files.
+  - If `environment_report.md` says the solver environment probe failed, record the limitation in `notes.md`; do not fake CIFs or silently use the project runtime.
   - If an optional dependency is unavailable at runtime, exit non-zero with a clear error naming the missing dependency. Do NOT emit placeholder geometry to keep the pipeline green — per-problem zero scores are allowed; fabricated outputs are not.
 - Record your reasoning and code changes in `notes.md`.
 

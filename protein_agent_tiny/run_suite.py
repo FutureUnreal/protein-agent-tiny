@@ -62,11 +62,11 @@ def append_log(path: Path, event_type: str, **payload: object) -> None:
 
 
 def solver_command(solver: Path, problem: Problem, out_dir: Path, rounds: int) -> list[str]:
-    # Solver subprocess uses the resolved solver Python (host system if it has
-    # the scientific stack, .venv otherwise). See runtime.solver_env.
+    # Solver subprocess uses host Python when torch is already available;
+    # otherwise it can use the workspace-owned uv environment.
     from .runtime.solver_env import resolve_solver_python
     return [
-        resolve_solver_python().python,
+        resolve_solver_python(solver.parent).python,
         str(solver),
         "--problem-id",
         problem.problem_id,

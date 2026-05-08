@@ -29,3 +29,4 @@ htmlcov/
 protein_agent_tiny/solver.py
 protein_agent_tiny/solver_pkg/
 PARTICIPANT_GUIDE.md
+look.md

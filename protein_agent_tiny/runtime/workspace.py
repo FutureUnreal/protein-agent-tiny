@@ -9,6 +9,9 @@ from ..prompts import load
 _PRESERVE_ON_REPREP = {
     "solver_pkg",
     "best_pipeline",
+    "pyproject.toml",
+    "uv.lock",
+    ".venv",
     "research_plan.md",
     "hypothesis.md",
     "notes.md",
@@ -27,8 +30,9 @@ def prepare_workspace(workspace: Path, root: Path) -> None:
     When the workspace already contains agent-produced state (solver_pkg,
     best_pipeline, research artifacts), that state is preserved so that
     reruns can take the improve-agent path via solver_pkg/.pipeline_ready
-    detection. Only regenerated scaffolding (problems, pyproject copy,
-    skill doc, helper script, notes bootstrap) is refreshed.
+    detection. Only regenerated scaffolding (problems, skill doc, helper
+    script, notes bootstrap) is refreshed. Workspace dependency files belong
+    to the agent's solver environment and are preserved.
 
     Does NOT copy any solver file. solver_pkg/ is created by the bootstrap
     agent on first run, and reused on subsequent runs via solver_pkg/.pipeline_ready.
@@ -47,7 +51,6 @@ def prepare_workspace(workspace: Path, root: Path) -> None:
             except OSError:
                 pass
 
-    shutil.copy2(root / "pyproject.toml", workspace / "pyproject.toml")
     problems_dst = workspace / "problems"
     if problems_dst.exists():
         shutil.rmtree(problems_dst, ignore_errors=True)

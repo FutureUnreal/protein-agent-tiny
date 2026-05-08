@@ -1,22 +1,13 @@
 """Resolve the Python interpreter that runs solver_pkg/cli.py.
 
-The agent runtime always runs in the project's uv-managed .venv. But the
-solver subprocess can run in a different interpreter — typically a Docker
-image that already has torch / esmfold / biotite installed system-wide.
-Reusing the system interpreter avoids duplicating multi-GB ML dependencies
-in the project venv.
+The framework runtime runs in the project root uv environment. The generated
+solver is allowed to use a separate environment owned by the current workspace.
 
 Resolution order:
-  1. $PROTEIN_AGENT_SOLVER_PYTHON — explicit override.
-  2. Probe candidate system interpreters (`python3`, `python`) for the
-     scientific-stack import set; the first one that imports useful packages
-     wins. "Useful" = at least numpy AND one of {torch, biotite, esm,
-     transformers}. A bare numpy is not enough to prefer system over .venv.
-  3. Fall back to sys.executable (the agent runtime's own .venv python).
-     The agent is then expected to add deps to pyproject.toml when needed.
-
-The choice is recorded in environment_report so the bootstrap/improve agent
-can see which packages are already available where.
+  1. PROTEIN_AGENT_SOLVER_PYTHON, when explicitly set.
+  2. Local system Python with torch already installed.
+  3. Workspace .venv created from workspaces/current/pyproject.toml via uv.
+  4. Fail loudly. The project runtime Python is not a solver fallback.
 """
 from __future__ import annotations
 
@@ -29,22 +20,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# Packages whose presence indicates a "scientific" host environment that's
-# better than the project's own .venv. numpy alone is not enough — the project
-# venv has it too. We want to detect torch / biotite / esm / transformers etc.
 HOST_INDICATOR_PACKAGES = ("torch", "biotite", "esm", "transformers", "openmm", "Bio")
 
 
 @dataclass(frozen=True)
 class SolverEnvProbe:
     python: str
-    source: str  # "override" | "host" | "venv"
-    available_packages: dict  # package_name -> bool
+    source: str  # "override" | "host" | "workspace"
+    available_packages: dict
     notes: str
 
 
 def _probe_imports(python: str, packages: tuple) -> dict:
-    """Return {pkg: bool} for whether `python -c 'import pkg'` succeeds."""
     if not python:
         return {p: False for p in packages}
     code = (
@@ -54,7 +41,10 @@ def _probe_imports(python: str, packages: tuple) -> dict:
     )
     try:
         proc = subprocess.run(
-            [python, "-c", code], capture_output=True, text=True, timeout=15,
+            [python, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=15,
         )
         if proc.returncode != 0:
             return {p: False for p in packages}
@@ -63,48 +53,133 @@ def _probe_imports(python: str, packages: tuple) -> dict:
         return {p: False for p in packages}
 
 
-def _is_host_useful(probe: dict) -> bool:
-    """A host interpreter is preferred over .venv only if it offers more than numpy."""
-    return any(probe.get(p) for p in ("torch", "biotite", "esm", "transformers", "openmm", "Bio"))
+def _workspace_python(workspace: Path) -> Path:
+    if os.name == "nt":
+        return workspace / ".venv" / "Scripts" / "python.exe"
+    return workspace / ".venv" / "bin" / "python"
 
 
-def resolve_solver_python(packages: tuple = HOST_INDICATOR_PACKAGES) -> SolverEnvProbe:
+def _find_uv() -> str | None:
+    found = shutil.which("uv")
+    if found:
+        return found
+    for candidate in (
+        Path.home() / ".local" / "bin" / "uv",
+        Path.home() / ".cargo" / "bin" / "uv",
+        Path.home() / ".local" / "bin" / "uv.exe",
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _install_uv() -> str | None:
+    if os.name == "nt":
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "irm https://astral.sh/uv/install.ps1 | iex",
+        ]
+    else:
+        command = ["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"]
+    try:
+        subprocess.run(command, capture_output=True, text=True, timeout=180)
+    except Exception:
+        return None
+    return _find_uv()
+
+
+def _ensure_workspace_pyproject(workspace: Path) -> None:
+    pyproject = workspace / "pyproject.toml"
+    if pyproject.exists():
+        return
+    pyproject.write_text(
+        "[project]\n"
+        'name = "protein-agent-workspace-solver"\n'
+        'version = "0.0.0"\n'
+        'requires-python = ">=3.10"\n'
+        "dependencies = [\n"
+        '  "numpy>=1.26",\n'
+        '  "torch>=2.2.0,<2.7",\n'
+        "]\n"
+        "\n"
+        "[tool.uv]\n"
+        "package = false\n",
+        encoding="utf-8",
+    )
+
+
+def _ensure_workspace_env(workspace: Path) -> tuple[str | None, str]:
+    workspace.mkdir(parents=True, exist_ok=True)
+    _ensure_workspace_pyproject(workspace)
+
+    workspace_python = _workspace_python(workspace)
+    if workspace_python.exists():
+        return str(workspace_python), "Reusing existing workspace .venv."
+
+    uv = _find_uv() or _install_uv()
+    if not uv:
+        return None, "uv is unavailable and automatic uv installation failed."
+
+    proc = subprocess.run(
+        [uv, "sync"],
+        cwd=str(workspace),
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    if proc.returncode != 0:
+        return None, f"uv sync failed: {proc.stderr.strip()[:1000]}"
+    if workspace_python.exists():
+        return str(workspace_python), "Created workspace .venv with uv sync."
+    return None, "uv sync completed but workspace Python was not found."
+
+
+def resolve_solver_python(
+    workspace: Path | None = None,
+    packages: tuple = HOST_INDICATOR_PACKAGES,
+) -> SolverEnvProbe:
     override = os.environ.get("PROTEIN_AGENT_SOLVER_PYTHON")
-    if override and Path(override).exists():
+    if override:
+        if not Path(override).exists():
+            raise RuntimeError(f"PROTEIN_AGENT_SOLVER_PYTHON does not exist: {override}")
         return SolverEnvProbe(
             python=override,
             source="override",
             available_packages=_probe_imports(override, packages + ("numpy",)),
-            notes="Selected via PROTEIN_AGENT_SOLVER_PYTHON env var.",
+            notes="Selected via PROTEIN_AGENT_SOLVER_PYTHON.",
         )
 
-    # Try host interpreters that are NOT the agent runtime's sys.executable.
     runtime_py = Path(sys.executable).resolve()
     for candidate_name in ("python3", "python"):
         candidate = shutil.which(candidate_name)
         if not candidate:
             continue
         if Path(candidate).resolve() == runtime_py:
-            continue  # same as agent runtime; not a host environment.
-        host_probe = _probe_imports(candidate, packages + ("numpy",))
-        if _is_host_useful(host_probe):
+            continue
+        probe = _probe_imports(candidate, packages + ("numpy",))
+        if probe.get("torch"):
             return SolverEnvProbe(
                 python=candidate,
                 source="host",
-                available_packages=host_probe,
-                notes=(
-                    "Detected scientific stack on system Python; reusing it for solver "
-                    "to avoid duplicating heavy ML deps inside .venv."
-                ),
+                available_packages=probe,
+                notes="Detected torch on local system Python; using it directly.",
             )
 
-    # Fall back to agent runtime's own python.
-    return SolverEnvProbe(
-        python=sys.executable,
-        source="venv",
-        available_packages=_probe_imports(sys.executable, packages + ("numpy",)),
-        notes=(
-            "No suitable host interpreter found; using project .venv python. "
-            "Agent should add scientific dependencies to pyproject.toml when needed."
-        ),
+    if workspace is not None:
+        workspace_python, note = _ensure_workspace_env(workspace)
+        if workspace_python:
+            return SolverEnvProbe(
+                python=workspace_python,
+                source="workspace",
+                available_packages=_probe_imports(workspace_python, packages + ("numpy",)),
+                notes=f"{note} Controlled by the workspace pyproject.toml.",
+            )
+
+    raise RuntimeError(
+        "No usable solver Python found. Set PROTEIN_AGENT_SOLVER_PYTHON, install torch "
+        "into a local system Python, or provide a workspace where uv can create .venv."
     )
