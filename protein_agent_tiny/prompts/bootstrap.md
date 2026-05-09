@@ -9,7 +9,7 @@ Your pipeline will be scored by the organizers using:
 - **Base score (50% weight)** = average of Coverage CA-RMSD (for each GT conformer, nearest Pred; smaller = better) and Precision CA-RMSD (for each Pred conformer, nearest GT; smaller = better). Submitting more conformers can raise coverage but hurts precision if the extras are noisy.
 - **Ensemble quality (50% weight)**: structural diversity (RMSF correlation, pairwise RMSD distribution, 30%), PCA coverage in GT subspace (10%), physical plausibility (CA clash + Ramachandran legality, 20%), Boltzmann consistency (RMSD std ratio, 20%), NMR ensemble coverage (20%).
 
-Your local proxy (computed from CIF coordinates by `scoring.proxy`) approximates these but is NOT the official metric. Your `agent.log` is a mandatory audit trail — missing it disqualifies the submission.
+Your local proxy (computed from generated CIF coordinates by `scoring.proxy`) is an internal selection and sanity score, not an approximation of the official metric. It does not use hidden GT structures and cannot measure official coverage, official precision, GT-PCA coverage, RMSF correlation, Boltzmann consistency, or NMR coverage. Your `agent.log` is a mandatory audit trail — missing it disqualifies the submission.
 
 ## Hard constraints
 

@@ -9,7 +9,7 @@ It is intentionally not a general research app. There is no frontend and no cros
 3. Probe CPU/GPU/packages into `environment_report.md`.
 4. Retrieve a small OpenAlex literature set into `literature_review.md`.
 5. Route to bootstrap-agent or improve-agent based on presence of `solver_pkg/.pipeline_ready` sentinel.
-6. Keep the best accepted `solver_pkg/` snapshot in `best_pipeline/` by a CIF-coordinate-based proxy score.
+6. Keep the best accepted `solver_pkg/` snapshot in `best_pipeline/` by a generated-CIF internal selection score, and retain every scored candidate under `candidate_pipelines/`.
 7. Update factual long-term memory under `memory/`.
 8. Run the pipeline CLI for all problems.
 9. Package `output.zip`.
@@ -33,7 +33,10 @@ The agent runs as a state machine with three roles:
    System prompt declares "you are evolving an EXISTING pipeline located at solver_pkg/".
    Each iteration writes `research_plan.md` and `hypothesis.md`, makes a minimal bounded
    change to `solver_pkg/`, runs a smoke test, and updates an `accepted_history`. The
-   `best_pipeline/` directory holds the snapshot accepted by hard-gate + proxy score.
+   `best_pipeline/` directory holds the snapshot accepted by hard-gate + internal
+   selection score; `candidate_pipelines/` keeps the accepted and rejected scored
+   snapshots so later iterations can compare branches instead of only chasing the
+   latest scalar.
 
 3. **reflect-agent** — runs after every improve iteration with no tools and a single LLM
    call. Produces `observation_<iter>.md` with Evidence / Supported / Risks / Open Questions.

@@ -25,6 +25,13 @@ def test_ok_conformers_no_violations(tmp_path):
     assert isinstance(report, ProxyReport)
     assert report.score > 0
     assert len(report.hard_gate_violations) == 0
+    metrics = report.per_problem["1"]
+    assert "generated_pairwise_rmsd" in metrics
+    assert "generated_effective_rank_score" in metrics
+    assert "medoid_outlier_score" in metrics
+    assert "diversity" not in metrics
+    assert "pca_rank" not in metrics
+    assert "precision_proxy" not in metrics
 
 
 def test_duplicate_conformers(tmp_path):

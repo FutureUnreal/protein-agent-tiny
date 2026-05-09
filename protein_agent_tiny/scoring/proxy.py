@@ -33,9 +33,11 @@ class ProxyReport:
     geometry_violations: tuple = ()
 
 
-# Proxy weight constants.
-# Weights chosen to balance coverage-like (diversity), precision-like (outlier penalty),
-# and structural plausibility (rg, spacing, clash, dihedral, pca, finite). Sum to 1.0.
+# Internal selection weight constants.
+# This score is a local validity/sanity heuristic. It cannot estimate official
+# hidden-GT coverage, precision, GT-PCA coverage, RMSF correlation,
+# Boltzmann consistency, or NMR coverage. Generated-only diagnostics are
+# intentionally named as such.
 W_DIVERSITY = 0.25
 W_RG = 0.15
 W_SPACING = 0.10
@@ -127,7 +129,7 @@ def _split_violations(violations: list[str]) -> tuple[tuple[str, ...], tuple[str
     return format_violations, geometry_violations
 
 
-def _pca_score(pe: dict, n_conformers: int) -> float:
+def _generated_rank_score(pe: dict, n_conformers: int) -> float:
     rank = pe.get("rank", 1.0)
     if n_conformers <= 1:
         return 0.0
@@ -242,19 +244,21 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
         if len(traces) >= 2:
             pairwise = ensemble_pairwise_matrix(traces)
             triu = pairwise[np.triu_indices_from(pairwise, k=1)]
-            diversity = float(np.mean(triu)) if triu.size else 0.0
+            generated_pairwise_rmsd = float(np.mean(triu)) if triu.size else 0.0
             rg_upper = 2.8 * max(n_res, 1) ** 0.52
             diversity_target = max(3.0, min(20.0, 0.35 * rg_upper))
-            diversity_sc = _bounded_peak(diversity, 0.5, diversity_target, diversity_target * 3.0)
+            diversity_sc = _bounded_peak(
+                generated_pairwise_rmsd, 0.5, diversity_target, diversity_target * 3.0
+            )
             pe = pca_effective_rank(traces)
-            pca_sc = _pca_score(pe, len(traces))
+            generated_rank_sc = _generated_rank_score(pe, len(traces))
             precision_penalty = medoid_outlier_ratio(pairwise)
-            precision_sc = max(0.0, 1.0 - precision_penalty)
+            medoid_outlier_sc = max(0.0, 1.0 - precision_penalty)
         else:
-            diversity = 0.0
+            generated_pairwise_rmsd = 0.0
             diversity_sc = 0.0
-            pca_sc = 0.0
-            precision_sc = 0.5  # single-conformer: neutral
+            generated_rank_sc = 0.0
+            medoid_outlier_sc = 0.5  # single-conformer: neutral
 
         unique_fraction, duplicate_penalty = _conformer_uniqueness(parsed_list)
         if n_conf > 1 and unique_fraction < 1.0:
@@ -268,20 +272,20 @@ def score_submission(submission_dir: Path, expected_problems: dict) -> ProxyRepo
             + W_SPACING * spacing_sc
             + W_CLASH * clash_sc
             + W_DIHEDRAL * dihedral_sc
-            + W_PCA * pca_sc
-            + W_PRECISION * precision_sc
+            + W_PCA * generated_rank_sc
+            + W_PRECISION * medoid_outlier_sc
             + W_FINITE * finite_frac
         )
         problem_score *= _soft_clash_penalty(clash_vals)
         problem_score *= duplicate_penalty
         per_problem[pid] = {
             "score": round(problem_score, 6),
-            "diversity": round(diversity, 4),
+            "generated_pairwise_rmsd": round(generated_pairwise_rmsd, 4),
             "rg_mean": round(rg_mean, 3),
             "clash_min": round(min(clash_vals), 3) if clash_vals else 0.0,
             "dihedral_smoothness": round(dihedral_sc, 4),
-            "pca_rank": round(pca_sc, 4),
-            "precision_proxy": round(precision_sc, 4),
+            "generated_effective_rank_score": round(generated_rank_sc, 4),
+            "medoid_outlier_score": round(medoid_outlier_sc, 4),
             "finite_frac": round(finite_frac, 4),
             "soft_clash_penalty": round(_soft_clash_penalty(clash_vals), 4),
             "duplicate_penalty": round(duplicate_penalty, 4),

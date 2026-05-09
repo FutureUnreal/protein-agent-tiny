@@ -249,6 +249,59 @@ def _smoke_test_cli(workspace: Path, sequence: str) -> bool:
         return False
 
 
+def _candidate_portfolio(workspace: Path, limit: int = 8) -> list[dict]:
+    portfolio_root = workspace / "candidate_pipelines"
+    if not portfolio_root.exists():
+        return []
+    items = []
+    for metadata_path in sorted(portfolio_root.glob("*/metadata.json")):
+        try:
+            items.append(json.loads(metadata_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return items[-limit:]
+
+
+def _snapshot_candidate_pipeline(
+    workspace: Path,
+    iteration: int,
+    proxy,
+    accepted: bool,
+    reason: str,
+    score_dir: Path | None,
+    solver_changed: bool,
+) -> None:
+    source = workspace / "solver_pkg"
+    if not source.exists():
+        return
+    portfolio_root = workspace / "candidate_pipelines"
+    portfolio_root.mkdir(parents=True, exist_ok=True)
+    status = "accepted" if accepted else "rejected"
+    score = float(getattr(proxy, "score", -1.0))
+    dest = portfolio_root / f"iter_{iteration:02d}_{score:.6f}_{status}"
+    if dest.exists():
+        shutil.rmtree(dest, ignore_errors=True)
+    shutil.copytree(
+        source,
+        dest / "solver_pkg",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    metadata = {
+        "iteration": iteration,
+        "status": status,
+        "accepted": accepted,
+        "reason": reason,
+        "selection_score_proxy": score,
+        "solver_changed": solver_changed,
+        "report_path": str(score_dir) if score_dir is not None else None,
+        "hard_gate_violations": list(getattr(proxy, "hard_gate_violations", ()) or ()),
+        "format_violations": list(getattr(proxy, "format_violations", ()) or ()),
+        "geometry_violations": list(getattr(proxy, "geometry_violations", ()) or ()),
+        "per_problem": getattr(proxy, "per_problem", {}) or {},
+    }
+    (dest / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+
 def _write_iteration_context(
     workspace: Path,
     iteration: int,
@@ -306,7 +359,14 @@ def _write_iteration_context(
         "literature_review_path": "literature_review.md",
         "memory_context_path": "memory_context.md",
         "environment_report_path": "environment_report.md",
-        "score_proxy_definition": "Internal selection proxy from real CIF coordinates: diversity/rg/spacing/clash/dihedral/pca/precision/finite. NOT the official hidden score.",
+        "candidate_portfolio": _candidate_portfolio(workspace),
+        "score_proxy_definition": (
+            "Internal selection score from generated CIF coordinates only. It is a validity, "
+            "physics-sanity, and generated-ensemble diagnostic used for local candidate ranking. "
+            "It does NOT use hidden GT structures and cannot estimate official coverage, "
+            "official precision, GT-PCA coverage, RMSF correlation, Boltzmann consistency, "
+            "or NMR coverage. Fields named generated_* or medoid_* are generated-only diagnostics."
+        ),
     }
     (workspace / "iteration_context.json").write_text(json.dumps(ctx, indent=2), encoding="utf-8")
 
@@ -548,6 +608,15 @@ def improve_phase(
         return history
     best_score = baseline_proxy.score
     best_proxy = baseline_proxy
+    _snapshot_candidate_pipeline(
+        workspace,
+        iteration=0,
+        proxy=baseline_proxy,
+        accepted=True,
+        reason="baseline",
+        score_dir=None,
+        solver_changed=False,
+    )
     (workspace / "baseline_result.json").write_text(
         json.dumps({
             "score": best_score,
@@ -607,6 +676,15 @@ def improve_phase(
             prev_best_score = best_score
 
             obs_text = _reflect(cfg, workspace, iteration, proxy, accepted, hypothesis)
+            _snapshot_candidate_pipeline(
+                workspace,
+                iteration=iteration,
+                proxy=proxy,
+                accepted=accepted,
+                reason=accept_reason,
+                score_dir=score_dir,
+                solver_changed=solver_changed,
+            )
             if accepted:
                 best_score = score
                 best_proxy = proxy

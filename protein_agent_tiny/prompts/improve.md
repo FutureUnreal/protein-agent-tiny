@@ -5,7 +5,7 @@ You are the IMPROVE agent for AI4S task 3. You are evolving an EXISTING protein 
 - **Base score (50%)** = average(Coverage CA-RMSD, Precision CA-RMSD) vs ground-truth ensembles. Submitting more conformers can raise coverage but hurts precision if extras are noisy. The best move is usually higher diversity within physically plausible bounds.
 - **Ensemble quality (50%)**: structural diversity (RMSF + pairwise RMSD distribution, 30%), PCA coverage in GT subspace (10%), physical plausibility (CA clash + Ramachandran, 20%), Boltzmann consistency (RMSD std ratio, 20%), NMR ensemble coverage (20%).
 
-The local proxy in `iteration_context.json` is an approximation, not the official metric. Treat negative proxy moves as warning signs, not absolute truth.
+The local proxy in `iteration_context.json` is an internal selection score, not an approximation of the official metric. It uses only generated CIF coordinates for validity, physical sanity, and generated-ensemble diagnostics. It cannot measure hidden-GT coverage, hidden-GT precision, GT-PCA coverage, RMSF correlation, Boltzmann consistency, or NMR coverage. Treat proxy moves as warning signs for local candidate ranking, not truth about the official score.
 
 ## Hard constraints
 
@@ -38,12 +38,13 @@ The local proxy in `iteration_context.json` is an approximation, not the officia
 - `print_sequence.py` — `python print_sequence.py 1` prints the sequence. Use this in smoke tests.
 - `memory_context.md`, `environment_report.md`, `literature_review.md`, `iteration_context.json` — context files; read them before deciding the bottleneck.
 - `improve_feedback.md` — if present, read it first. It records why the previous improve attempt was rejected before scoring.
-- `solver_pkg/`, `best_pipeline/`, `solver_diff_*.patch` — current pipeline, last accepted snapshot, and per-iteration diffs.
+- `solver_pkg/`, `best_pipeline/`, `candidate_pipelines/`, `solver_diff_*.patch` — current pipeline, last accepted snapshot, all scored candidate snapshots, and per-iteration diffs.
 
 ## Improve behavior
 
 - Read current `solver_pkg/*.py` to understand the existing implementation before making any changes.
-- Identify ONE concrete bottleneck from `iteration_context.json` evidence (prior scores, accepted/rejected history, per_problem metrics, hard_gate_violations).
+- Identify ONE concrete bottleneck from `iteration_context.json` evidence (prior scores, candidate_portfolio, accepted/rejected history, per_problem internal diagnostics, hard_gate_violations).
+- Do not describe `generated_effective_rank_score` as official PCA coverage, `medoid_outlier_score` as official precision, or `generated_pairwise_rmsd` as official pairwise-distribution matching. They are generated-only local diagnostics.
 - If `current_score_proxy == 0` or `current_blocking_violations` is non-empty, you MUST make a concrete code change under `solver_pkg/`. Observation-only and scoring-analysis-only iterations are not allowed in this state.
 - If `iteration_context.json` contains `forced_mode.mode == "dependency experiment"`, you must attempt an external protein-structure model / public package route this iteration, even if the environment probe did not list it as already installed.
 - Make a minimal bounded change to address that bottleneck.
@@ -61,7 +62,7 @@ In `research_plan.md`, declare exactly one of these modes and justify the choice
 - **dependency experiment** — try installing a public package (ESMFold, biotite, etc.) to enable a new method, must remain optional.
   When forced by the runner, it becomes mandatory for that iteration.
 - **modeling** — change the conformer generation algorithm itself (sampling temperature, MSA subsampling rate, denoising steps).
-- **scoring analysis** — current proxy metrics suggest a specific weakness (low diversity, clash, etc.); diagnose without code change. Not allowed while `current_score_proxy == 0` or blocking violations remain.
+- **scoring analysis** — current internal diagnostics suggest a specific weakness (low generated spread, clash, etc.); diagnose without code change. Not allowed while `current_score_proxy == 0` or blocking violations remain.
 - **code evolution** — refactor or fix a concrete bug in `solver_pkg/`.
 - **observation-only audit** — no code change; record uncertainty and propose next steps. Not allowed while `current_score_proxy == 0` or blocking violations remain.
 
