@@ -62,6 +62,8 @@ A working solver_pkg/ exists. Read it and the iteration_context.json, then make 
 Write research_plan.md and hypothesis.md as required by SKILL.md before editing solver_pkg/.
 
 CLI contract: python solver_pkg/cli.py --problem-id 1 --sequence SEQ --num-conformers 2 --optimization-rounds {solver_rounds} --out-dir smoke
+
+{forced_directive}
 """
 
 
@@ -254,6 +256,7 @@ def _write_iteration_context(
     best_score: float,
     history: list,
     current_proxy=None,
+    forced_mode: dict | None = None,
 ) -> None:
     """Snapshot the state the improve-agent must read before deciding.
 
@@ -286,6 +289,7 @@ def _write_iteration_context(
         "iteration": iteration,
         "total_iterations": total,
         "best_score_proxy": best_score,
+        "forced_mode": forced_mode or {},
         **diagnostics,
         "accepted_history": [
             {
@@ -478,6 +482,25 @@ def _restore_solver_pkg_from_best(workspace: Path, best_pipeline: Path) -> None:
     shutil.copytree(best_pipeline, target)
 
 
+def _forced_improve_mode(no_gain_streak: int) -> tuple[dict, str]:
+    if no_gain_streak >= 3:
+        forced_mode = {
+            "mode": "dependency experiment",
+            "reason": "three consecutive improve iterations without best-score gain",
+            "streak": no_gain_streak,
+        }
+        forced_directive = (
+            "## Forced upgrade\n"
+            "The last 3 improve iterations did not produce a best-score gain.\n"
+            "You MUST attempt a dependency experiment now: try an external protein-structure model route "
+            "(for example ESMFold / AlphaFold2 / Chai-1 or an equivalent public package), even if that "
+            "requires editing the workspace dependency manifest or installing a package. Do not stay in "
+            "observation-only or pure scoring-analysis mode.\n"
+        )
+        return forced_mode, forced_directive
+    return {}, ""
+
+
 def _write_improve_feedback(workspace: Path, iteration: int, current_proxy, reason: str) -> None:
     feedback = {
         "iteration": iteration,
@@ -537,12 +560,15 @@ def improve_phase(
     )
 
     current_proxy = baseline_proxy
+    consecutive_no_gain = 0
     for iteration in range(1, cfg.iterations + 1):
         _progress(f"iteration {iteration}/{cfg.iterations} started; best_score={best_score:.4f}")
+        forced_mode, forced_directive = _forced_improve_mode(consecutive_no_gain)
         before_files = _read_solver_pkg(workspace)
         _write_iteration_context(
             workspace, iteration, cfg.iterations, best_score, history,
             current_proxy=current_proxy,
+            forced_mode=forced_mode,
         )
         try:
             agent = build_improve_agent(cfg, workspace, ROOT / "runs")
@@ -550,6 +576,7 @@ def improve_phase(
                 f"improve-agent iteration {iteration}/{cfg.iterations}",
                 lambda: agent.run_sync(GOAL_IMPROVE.format(
                     iteration=iteration, total_iterations=cfg.iterations, solver_rounds=cfg.solver_rounds,
+                    forced_directive=forced_directive,
                 )),
             )
             (workspace / f"agent_final_answer_{iteration:02d}.md").write_text(result.final_answer or "", encoding="utf-8")
@@ -577,6 +604,7 @@ def improve_phase(
             score = proxy.score
             accepted, accept_reason = _accept_proxy(proxy, best_proxy, best_score)
             current_proxy = proxy
+            prev_best_score = best_score
 
             obs_text = _reflect(cfg, workspace, iteration, proxy, accepted, hypothesis)
             if accepted:
@@ -592,6 +620,11 @@ def improve_phase(
                 f"{'accepted' if accepted else 'rejected'}; reason={accept_reason}; score={score:.4f}; "
                 f"best_score={best_score:.4f}"
             )
+
+            if accepted and score > prev_best_score + 1e-9:
+                consecutive_no_gain = 0
+            else:
+                consecutive_no_gain += 1
 
             history.append(IterationResult(
                 iteration=iteration,
@@ -615,6 +648,7 @@ def improve_phase(
         except Exception as exc:
             _restore_solver_pkg_from_best(workspace, best_pipeline)
             _progress(f"iteration {iteration}/{cfg.iterations} failed: {str(exc)[:300]}")
+            consecutive_no_gain += 1
             history.append(IterationResult(
                 iteration=iteration,
                 accepted=False,

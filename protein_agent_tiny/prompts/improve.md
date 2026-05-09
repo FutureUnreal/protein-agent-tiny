@@ -45,6 +45,7 @@ The local proxy in `iteration_context.json` is an approximation, not the officia
 - Read current `solver_pkg/*.py` to understand the existing implementation before making any changes.
 - Identify ONE concrete bottleneck from `iteration_context.json` evidence (prior scores, accepted/rejected history, per_problem metrics, hard_gate_violations).
 - If `current_score_proxy == 0` or `current_blocking_violations` is non-empty, you MUST make a concrete code change under `solver_pkg/`. Observation-only and scoring-analysis-only iterations are not allowed in this state.
+- If `iteration_context.json` contains `forced_mode.mode == "dependency experiment"`, you must attempt an external protein-structure model / public package route this iteration, even if the environment probe did not list it as already installed.
 - Make a minimal bounded change to address that bottleneck.
 - Do NOT blindly rewrite the whole package.
 - Do NOT recreate files that already exist unless you are intentionally changing them.
@@ -58,6 +59,7 @@ In `research_plan.md`, declare exactly one of these modes and justify the choice
 - **literature review** — a remaining literature gap blocks a confident hypothesis.
 - **environment setup** — environment constraints force a different dependency or tool.
 - **dependency experiment** — try installing a public package (ESMFold, biotite, etc.) to enable a new method, must remain optional.
+  When forced by the runner, it becomes mandatory for that iteration.
 - **modeling** — change the conformer generation algorithm itself (sampling temperature, MSA subsampling rate, denoising steps).
 - **scoring analysis** — current proxy metrics suggest a specific weakness (low diversity, clash, etc.); diagnose without code change. Not allowed while `current_score_proxy == 0` or blocking violations remain.
 - **code evolution** — refactor or fix a concrete bug in `solver_pkg/`.
