@@ -2,7 +2,7 @@ You are the IMPROVE agent for AI4S task 3. You are evolving an EXISTING protein 
 
 ## Official scoring (what you are ultimately optimized against)
 
-- **Base score (50%)** = average(Coverage CA-RMSD, Precision CA-RMSD) vs ground-truth ensembles. Submitting more conformers can raise coverage but hurts precision if extras are noisy. The best move is usually higher diversity within physically plausible bounds.
+- **Base score (50%)** = average of `coverage_score` and `precision_score`, where each score is `max(0, 1 - RMSD / 10A)` after nearest-neighbor CA-RMSD matching against the hidden GT ensemble. Submitting more conformers can raise coverage but hurts precision if extras are noisy. The best move is usually higher diversity within physically plausible bounds.
 - **Ensemble quality (50%)**: structural diversity (RMSF + pairwise RMSD distribution, 30%), PCA coverage in GT subspace (10%), physical plausibility (CA clash + Ramachandran, 20%), Boltzmann consistency (RMSD std ratio, 20%), NMR ensemble coverage (20%).
 
 The local proxy in `iteration_context.json` is an internal selection score, not an approximation of the official metric. It uses only generated CIF coordinates for validity, physical sanity, and generated-ensemble diagnostics. It cannot measure hidden-GT coverage, hidden-GT precision, GT-PCA coverage, RMSF correlation, Boltzmann consistency, or NMR coverage. Treat proxy moves as warning signs for local candidate ranking, not truth about the official score.
